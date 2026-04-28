@@ -1,0 +1,270 @@
+/* Tideline — audio-tool theme: cool teal accent on tinted neutrals */
+
+@import "tailwindcss";
+
+@plugin "daisyui" {
+    themes: tideline-light --default, tideline-dark --prefersdark;
+}
+
+@plugin "daisyui/theme" {
+    name: "tideline-dark";
+    prefersdark: true;
+    color-scheme: dark;
+
+    --color-base-100: oklch(0.18 0.012 215);
+    --color-base-200: oklch(0.21 0.012 215);
+    --color-base-300: oklch(0.24 0.014 215);
+    --color-base-content: oklch(0.95 0.005 215);
+
+    --color-primary: oklch(0.72 0.13 195);
+    --color-primary-content: oklch(0.10 0.05 195);
+
+    --color-secondary: oklch(0.45 0.05 215);
+    --color-secondary-content: oklch(0.95 0.005 215);
+
+    --color-accent: oklch(0.72 0.13 195);
+    --color-accent-content: oklch(0.10 0.05 195);
+
+    --color-neutral: oklch(0.28 0.016 215);
+    --color-neutral-content: oklch(0.95 0.005 215);
+
+    --color-info: oklch(0.72 0.13 195);
+    --color-info-content: oklch(0.10 0.05 195);
+
+    --color-success: oklch(0.80 0.16 145);
+    --color-success-content: oklch(0.10 0.05 145);
+
+    --color-warning: oklch(0.83 0.13 95);
+    --color-warning-content: oklch(0.10 0.05 95);
+
+    --color-error: oklch(0.62 0.20 25);
+    --color-error-content: oklch(0.95 0.05 25);
+
+    --shadow-thumb-rest:   0 2px 6px oklch(0 0 0 / 0.50);
+    --shadow-thumb-active: 0 2px 10px oklch(0 0 0 / 0.60);
+    --shadow-thumb-flat:   0 1px 3px oklch(0 0 0 / 0.40);
+    --color-modal-scrim:   oklch(0.10 0.012 215 / 0.7);
+
+    --radius-selector: 4px;
+    --radius-field: 4px;
+    --radius-box: 6px;
+
+    --size-selector: 0.21875rem;
+    --size-field: 0.21875rem;
+
+    --border: 1px;
+    --depth: 1;
+    --noise: 0;
+}
+
+@plugin "daisyui/theme" {
+    name: "tideline-light";
+    default: true;
+    color-scheme: light;
+
+    /* Inverted lightness ramp, same 215° cool-grey hue */
+    --color-base-100: oklch(0.99 0.004 215);
+    --color-base-200: oklch(0.96 0.006 215);
+    --color-base-300: oklch(0.92 0.008 215);
+    --color-base-content: oklch(0.22 0.012 215);
+
+    /* Teal stays cohesive — drop lightness for AA contrast on light surfaces */
+    --color-primary: oklch(0.52 0.13 195);
+    --color-primary-content: oklch(0.99 0.004 195);
+
+    --color-secondary: oklch(0.62 0.04 215);
+    --color-secondary-content: oklch(0.18 0.012 215);
+
+    --color-accent: oklch(0.52 0.13 195);
+    --color-accent-content: oklch(0.99 0.004 195);
+
+    --color-neutral: oklch(0.32 0.016 215);
+    --color-neutral-content: oklch(0.96 0.005 215);
+
+    --color-info: oklch(0.52 0.13 195);
+    --color-info-content: oklch(0.99 0.004 195);
+
+    --color-success: oklch(0.50 0.16 145);
+    --color-success-content: oklch(0.98 0.02 145);
+
+    --color-warning: oklch(0.62 0.16 75);
+    --color-warning-content: oklch(0.15 0.05 75);
+
+    --color-error: oklch(0.55 0.22 25);
+    --color-error-content: oklch(0.99 0.02 25);
+
+    --shadow-thumb-rest:   0 2px 6px oklch(0 0 0 / 0.18);
+    --shadow-thumb-active: 0 2px 10px oklch(0 0 0 / 0.28);
+    --shadow-thumb-flat:   0 1px 3px oklch(0 0 0 / 0.15);
+    --color-modal-scrim:   oklch(0.20 0.012 215 / 0.4);
+
+    --radius-selector: 4px;
+    --radius-field: 4px;
+    --radius-box: 6px;
+
+    --size-selector: 0.21875rem;
+    --size-field: 0.21875rem;
+
+    --border: 1px;
+    --depth: 1;
+    --noise: 0;
+}
+
+:root {
+    /* Bridge layer: legacy tokens map to daisyUI semantic vars so
+       theme switching propagates without rewriting components yet. */
+
+    /* Surfaces */
+    --bg-base:      var(--color-base-100);
+    --bg-titlebar:  var(--color-base-200);
+    --bg-card:      var(--color-base-300);
+    --bg-btn:       var(--color-base-300);
+    --bg-hover:     color-mix(in oklch, var(--color-base-300) 60%, var(--color-base-content) 12%);
+
+    --border:       color-mix(in oklch, var(--color-base-content) 14%, transparent);
+    --border-hover: color-mix(in oklch, var(--color-base-content) 28%, transparent);
+
+    /* Accent — driven by daisyUI primary so themes can recolor it */
+    --accent:       var(--color-primary);
+    --accent-hover: color-mix(in oklch, var(--color-primary) 80%, white 20%);
+    --accent-soft:  color-mix(in oklch, var(--color-primary) 18%, transparent);
+
+    --text-primary: var(--color-base-content);
+    --text-muted:   color-mix(in oklch, var(--color-base-content) 65%, transparent);
+    --text-faint:   color-mix(in oklch, var(--color-base-content) 45%, transparent);
+
+    --fader-track:  oklch(0.30 0.016 215);
+    --fader-fill:   var(--accent);
+
+    /* Semantic — saturated red for mute/destructive */
+    --mute-active:  oklch(0.62 0.20 25);
+    --mute-hover:   oklch(0.58 0.20 25);
+
+    /* Meter — tri-zone level indicator (RMS bar + peak hold marker) */
+    --meter-ok:     var(--accent);
+    --meter-warn:   oklch(0.83 0.13 95);
+    --meter-hot:    var(--mute-active);
+
+    /* Semantic — status colors (success/error message blocks) */
+    --success-bg:   oklch(0.45 0.13 145 / 0.18);
+    --success-fg:   oklch(0.80 0.16 145);
+    --error-bg:     oklch(0.55 0.20 25 / 0.18);
+    --error-fg:     oklch(0.78 0.18 25);
+
+    /* Semantic — banner (offline/error strip) */
+    --banner-err-bg: oklch(0.55 0.20 25 / 0.15);
+    --banner-err-fg: oklch(0.78 0.13 25);
+
+    /* Semantic — close button hover (red, distinct from generic mute) */
+    --close-hover-bg: oklch(0.55 0.20 25 / 0.20);
+    --close-hover-fg: oklch(0.68 0.20 25);
+
+    /* Type scale — anchored to 16px body, 5 steps */
+    --fs-nano:     0.8125rem;  /* 13px — pills/badges */
+    --fs-micro:    0.875rem;   /* 14px — labels, hints, tiny buttons */
+    --fs-control:  0.9375rem;  /* 15px — buttons, inputs */
+    --fs-body:     1rem;       /* 16px — default text */
+    --fs-heading:  1.125rem;   /* 18px — modal titles, primary labels */
+
+    /* Radius scale — 3 steps */
+    --r-control:    4px;
+    --r-surface:    6px;
+    --r-container: 10px;
+
+    /* Spacing */
+    --sp-1: 4px;
+    --sp-2: 8px;
+    --sp-3: 12px;
+    --sp-4: 16px;
+    --sp-5: 24px;
+
+    /* Type — families */
+    --font-body: 'Geist', system-ui, -apple-system, sans-serif;
+    --font-mono: 'Geist Mono', ui-monospace, 'SF Mono', monospace;
+
+    /* Type — line heights */
+    --lh-tight:    1.2;   /* names, button labels */
+    --lh-body:     1.4;   /* paragraphs, hints */
+    --lh-relaxed:  1.5;   /* longer prose blocks */
+
+    /* Type — letter spacing */
+    --ls-tight:    -0.02em; /* mono numerics */
+    --ls-display:   0.04em; /* mixed-case display labels (channel names) */
+    --ls-cap-sm:    0.08em; /* small all-caps labels */
+    --ls-cap-lg:    0.12em; /* prominent all-caps (buttons, section headers) */
+
+    font-family: var(--font-body);
+    font-size: var(--fs-body);
+    color: var(--text-primary);
+    background: var(--bg-base);
+    font-feature-settings: 'cv11', 'ss01';
+}
+
+@layer base {
+    *, *::before, *::after {
+        box-sizing: border-box;
+    }
+
+    html, body {
+        height: 100%;
+        overflow: hidden;
+        background: var(--bg-base);
+        color: var(--text-primary);
+    }
+
+    #svelte {
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+    }
+
+    button {
+        font-family: inherit;
+    }
+
+    button:disabled,
+    select:disabled,
+    input:disabled,
+    textarea:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    button:focus-visible,
+    [role="slider"]:focus-visible,
+    input:focus-visible,
+    select:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+    }
+}
+
+.mono {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: var(--ls-tight);
+}
+
+::-webkit-scrollbar {
+    width: 7px;
+    height: 7px;
+}
+::-webkit-scrollbar-track {
+    background: var(--bg-base);
+}
+::-webkit-scrollbar-thumb {
+    background: var(--border-hover);
+    border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: var(--text-faint);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+}
