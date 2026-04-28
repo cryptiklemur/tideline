@@ -27,4 +27,8 @@ libpulse-binding = "2.28"
 libpulse-simple-binding = "2.28"
 freedesktop-icons = "0.4"
 base64 = "0.22"
+evdev = "0.13"
+hidapi = "2.6"
+notify-rust = "4.11"
+rodio = { version = "0.20", default-features = false, features = ["wav"] }
 
