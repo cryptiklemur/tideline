@@ -728,7 +728,7 @@ fn load_config() -> AppConfig {
     cfg
 }
 
-fn save_config_to_disk(cfg: &AppConfig) -> Result<(), String> {
+pub(crate) fn save_config_to_disk(cfg: &AppConfig) -> Result<(), String> {
     let path = config_path();
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
