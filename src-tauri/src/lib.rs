@@ -82,6 +82,48 @@ pub enum KeybindAction {
     ToggleMixEnabled { mix_id: String },
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Mode { Open, Ptt }
+
+impl Default for Mode { fn default() -> Self { Mode::Open } }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PttConfig {
+    #[serde(default)]
+    pub mode: Mode,
+    #[serde(default)]
+    pub mode_toggle_binding: Option<crate::ptt::binding::Binding>,
+    #[serde(default)]
+    pub hold_binding: Option<crate::ptt::binding::Binding>,
+    #[serde(default)]
+    pub input_device: String,
+    #[serde(default = "default_tones_enabled")]
+    pub tones_enabled: bool,
+    #[serde(default = "default_tones_volume")]
+    pub tones_volume: u32,
+    #[serde(default = "default_led_enabled")]
+    pub led_enabled: bool,
+}
+
+fn default_tones_enabled() -> bool { true }
+fn default_tones_volume() -> u32 { 100 }
+fn default_led_enabled() -> bool { true }
+
+impl Default for PttConfig {
+    fn default() -> Self {
+        Self {
+            mode: Mode::Open,
+            mode_toggle_binding: None,
+            hold_binding: None,
+            input_device: String::new(),
+            tones_enabled: true,
+            tones_volume: 100,
+            led_enabled: true,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     #[serde(default)]
@@ -89,6 +131,8 @@ pub struct AppConfig {
     pub channels: Vec<ChannelCfg>,
     #[serde(default)]
     pub keybinds: HashMap<String, KeybindAction>,
+    #[serde(default)]
+    pub ptt: PttConfig,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -624,6 +668,7 @@ fn default_config() -> AppConfig {
             output_channel("System"),
         ],
         keybinds: HashMap::new(),
+        ptt: PttConfig::default(),
     }
 }
 

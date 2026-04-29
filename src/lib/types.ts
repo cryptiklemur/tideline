@@ -35,6 +35,7 @@ export interface AppConfig {
     mixes: Mix[];
     channels: ChannelConfig[];
     keybinds: Record<string, KeybindAction>;
+    ptt: PttConfig;
 }
 
 export interface SinkInfo {
@@ -77,4 +78,29 @@ export interface CardControl {
     is_capture: boolean;
     is_playback: boolean;
     current_db: number | null;
+}
+
+export type Modifier = 'ctrl' | 'shift' | 'alt' | 'super';
+
+export type Binding =
+    | { kind: 'keyboard'; mods: Modifier[]; key: string }
+    | { kind: 'mouse'; mods: Modifier[]; button: string };
+
+export type Mode = 'open' | 'ptt';
+
+export interface PttConfig {
+    mode: Mode;
+    mode_toggle_binding: Binding | null;
+    hold_binding: Binding | null;
+    input_device: string;
+    tones_enabled: boolean;
+    tones_volume: number;
+    led_enabled: boolean;
+}
+
+export interface PttState {
+    mode: Mode;
+    hold_active: boolean;
+    transmitting: boolean; // mode==='open' || hold_active
+    error: string | null;  // e.g., evdev permission failure
 }

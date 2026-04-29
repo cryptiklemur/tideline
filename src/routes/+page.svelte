@@ -20,7 +20,20 @@ import type { AppConfig, AudioBackendStatus, ChannelConfig, ChannelKind, Channel
 
 type View = 'mixes' | 'input' | 'output' | 'mix';
 
-let config = $state<AppConfig>({ mixes: [], channels: [], keybinds: {} });
+let config = $state<AppConfig>({
+    mixes: [],
+    channels: [],
+    keybinds: {},
+    ptt: {
+        mode: 'open',
+        mode_toggle_binding: null,
+        hold_binding: null,
+        input_device: '',
+        tones_enabled: true,
+        tones_volume: 100,
+        led_enabled: true,
+    },
+});
 let mixEnabled = $state<Record<string, boolean>>({});
 let settingsOpen = $state(false);
 let pipewireOk = $state(true);
