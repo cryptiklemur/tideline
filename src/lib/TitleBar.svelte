@@ -1,6 +1,10 @@
 <script lang="ts">
 import { invoke } from '@tauri-apps/api/core';
+import type { Snippet } from 'svelte';
 import Icon from './Icon.svelte';
+
+interface Props { children?: Snippet; }
+let { children }: Props = $props();
 
 function startDrag(e: MouseEvent) {
     if (e.button !== 0) return;
@@ -25,7 +29,12 @@ function doHide() {
         <span class="flex items-center justify-center text-primary"><Icon name="wave" size={14} /></span>
         <span class="text-base font-semibold text-base-content/55 uppercase tracking-wider">Tideline</span>
     </div>
-    <div class="flex gap-1" onmousedown={(e) => e.stopPropagation()}>
+    <div class="flex items-center gap-2" onmousedown={(e) => e.stopPropagation()}>
+        {#if children}
+            <div class="flex items-center gap-2 mr-2">
+                {@render children()}
+            </div>
+        {/if}
         <button
             class="btn btn-ghost btn-square h-7 min-h-7 w-7 text-base-content/55 hover:text-base-content"
             onclick={doMinimize}
