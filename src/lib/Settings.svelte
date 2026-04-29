@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import Icon, { type IconName } from './Icon.svelte';
 import KeybindRow from './KeybindRow.svelte';
 import Modal from './Modal.svelte';
+import SettingsPtt from './SettingsPtt.svelte';
 import type { AppConfig, AudioBackendStatus, KeybindAction, SinkInfo } from './types';
 
 interface Props {
@@ -11,16 +12,18 @@ interface Props {
     outputs: SinkInfo[];
     onSetKeybind: (accelerator: string, action: KeybindAction) => Promise<void>;
     onClearKeybind: (accelerator: string) => Promise<void>;
+    onConfigUpdate: (next: AppConfig) => void;
     onClose: () => void;
 }
 
-let { open = $bindable(), config, outputs, onSetKeybind, onClearKeybind, onClose }: Props = $props();
+let { open = $bindable(), config, outputs, onSetKeybind, onClearKeybind, onConfigUpdate, onClose }: Props = $props();
 
-type SectionId = 'general' | 'appearance' | 'keybinds' | 'devices';
+type SectionId = 'general' | 'appearance' | 'keybinds' | 'ptt' | 'devices';
 const SECTIONS: { id: SectionId; label: string; icon: IconName; hint: string }[] = [
     { id: 'general', label: 'General', icon: 'info', hint: 'Overview of your routing setup.' },
     { id: 'appearance', label: 'Appearance', icon: 'palette', hint: 'Theme and visual preferences.' },
     { id: 'keybinds', label: 'Keybinds', icon: 'keyboard', hint: 'Global mute shortcuts.' },
+    { id: 'ptt', label: 'Push-to-Talk', icon: 'volume-mute', hint: 'Mode toggle and hold-to-talk.' },
     { id: 'devices', label: 'Devices', icon: 'cable', hint: 'Detected PipeWire sinks.' },
 ];
 
@@ -286,6 +289,8 @@ let outputCount = $derived(config.channels.filter(c => (c.kind ?? 'output') === 
                         {/if}
                     {/if}
                 {/if}
+            {:else if active === 'ptt'}
+                <SettingsPtt {config} {onConfigUpdate} />
             {:else if active === 'devices'}
                 <header class="flex flex-col gap-1 mb-4">
                     <h3 class="text-base font-semibold m-0">Devices</h3>

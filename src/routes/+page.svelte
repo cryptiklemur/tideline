@@ -639,6 +639,7 @@ async function clearKeybind(accelerator: string) {
     {outputs}
     onSetKeybind={setKeybind}
     onClearKeybind={clearKeybind}
+    onConfigUpdate={(next) => config = next}
     onClose={() => settingsOpen = false}
 />
 
