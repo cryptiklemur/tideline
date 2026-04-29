@@ -1,3 +1,5 @@
+#[cfg(target_os = "linux")]
+mod glib_log;
 mod levels;
 mod ptt;
 mod routing;
@@ -1684,11 +1686,13 @@ fn ptt_get_state(app: AppHandle) -> crate::ptt::PttStateEvent {
     let runtime = app.state::<Arc<crate::ptt::PttRuntime>>().inner().clone();
     let s = *runtime.state.lock().unwrap();
     let err = runtime.last_error.lock().unwrap().clone();
+    let method = *runtime.capture_method.lock().unwrap();
     crate::ptt::PttStateEvent {
         mode: s.mode,
         hold_active: s.hold_active,
         transmitting: s.transmitting(),
         error: err,
+        capture_method: method,
     }
 }
 
@@ -1700,6 +1704,109 @@ fn ptt_detect_wave_xlr() -> Option<String> {
 #[tauri::command]
 fn ptt_wave_xlr_present() -> bool {
     crate::ptt::wave_xlr::is_present()
+}
+
+/// Install a udev rule that grants the active local session uaccess to
+/// /dev/input/event*. Triggered from the Settings UI when evdev capture
+/// fails the permission probe. Uses pkexec to authenticate; the user sees
+/// the system polkit agent's password prompt.
+///
+/// On success, re-probes /dev/input. If the probe now passes, last_error is
+/// cleared. The evdev listener's rescan_loop picks up the newly-accessible
+/// devices on its next iteration (every 5s).
+#[tauri::command]
+async fn ptt_install_udev_rule(app: AppHandle) -> Result<String, String> {
+    // Heredoc terminator is intentionally quoted ('RULE') so the shell
+    // doesn't expand any contents — the rule body is literal.
+    const SCRIPT: &str = r#"set -e
+cat > /etc/udev/rules.d/99-tideline-input.rules <<'RULE'
+# Tideline PTT — grants the active local session access to /dev/input/event*
+# without requiring `input` group membership. Safe to remove if you uninstall
+# Tideline. systemd-logind applies the uaccess ACL on session activation.
+KERNEL=="event*", SUBSYSTEM=="input", TAG+="uaccess"
+RULE
+chmod 0644 /etc/udev/rules.d/99-tideline-input.rules
+udevadm control --reload
+udevadm trigger --subsystem-match=input
+"#;
+
+    let output = tokio::process::Command::new("pkexec")
+        .arg("sh")
+        .arg("-c")
+        .arg(SCRIPT)
+        .output()
+        .await
+        .map_err(|e| format!("pkexec spawn failed: {}", e))?;
+
+    if !output.status.success() {
+        // pkexec exits 126 on auth failure / cancel. Surface stderr so the
+        // user sees what happened.
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stderr = stderr.trim();
+        let code = output.status.code().unwrap_or(-1);
+        if code == 126 || stderr.contains("dismissed") || stderr.contains("not authorized") {
+            return Err("Authentication cancelled or denied.".to_string());
+        }
+        return Err(format!("pkexec exited {}: {}", code, stderr));
+    }
+
+    let runtime = app.state::<Arc<crate::ptt::PttRuntime>>().inner().clone();
+    if crate::ptt::evdev_listener::probe_permission().is_ok() {
+        crate::ptt::set_error(&app.clone(), &runtime, None);
+        Ok("Installed. PTT input access is now active.".to_string())
+    } else {
+        Ok("Installed. Log out and back in (or replug input devices) for it to take effect.".to_string())
+    }
+}
+
+/// Open the desktop's shortcut configuration UI so the user can assign key
+/// combos to the bound shortcut IDs. Only meaningful when
+/// capture_method == Portal.
+///
+/// Tries the portal's `ConfigureShortcuts` method first (portal v2). If that
+/// fails — most commonly because the active backend is still on v1 — falls
+/// back to opening the desktop's native shortcut settings panel directly.
+#[tauri::command]
+async fn ptt_configure_shortcuts() -> Result<(), String> {
+    use ashpd::desktop::global_shortcuts::GlobalShortcuts;
+    if let Ok(portal) = GlobalShortcuts::new().await {
+        if let Ok(session) = portal.create_session(Default::default()).await {
+            if portal
+                .configure_shortcuts(&session, None, Default::default())
+                .await
+                .is_ok()
+            {
+                return Ok(());
+            }
+        }
+    }
+    // Fallback: open the compositor's shortcut UI directly.
+    let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
+    let cmd: &[&str] = if desktop.to_ascii_lowercase().contains("kde") {
+        &["kcmshell6", "kcm_keys"]
+    } else if desktop.to_ascii_lowercase().contains("gnome") {
+        &["gnome-control-center", "keyboard"]
+    } else {
+        // Last-resort: xdg-open on a settings URI is desktop-dependent;
+        // tell the caller to navigate manually.
+        return Err(
+            "Portal v2 configure_shortcuts unavailable on this desktop. \
+             Open your system's keyboard shortcut settings manually and look for Tideline."
+                .to_string(),
+        );
+    };
+    let status = tokio::process::Command::new(cmd[0])
+        .args(&cmd[1..])
+        .spawn()
+        .map_err(|e| format!("spawn {} failed: {}", cmd[0], e))?
+        .wait()
+        .await
+        .map_err(|e| format!("wait {} failed: {}", cmd[0], e))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("{} exited {}", cmd[0], status.code().unwrap_or(-1)))
+    }
 }
 
 fn build_tray_menu(
@@ -1798,6 +1905,7 @@ pub fn run() {
         // path keeps the surface protocol happy.
         std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
         std::env::set_var("WEBKIT_FORCE_COMPOSITING_MODE", "1");
+        glib_log::suppress_upstream_warnings();
     }
 
     let cfg = load_config();
@@ -1855,7 +1963,51 @@ pub fn run() {
                     }
                 }
             }
-            crate::ptt::evdev_listener::start(ptt_runtime, app.handle().clone());
+            // PTT capture: try GlobalShortcuts portal first (Wayland-native, no
+            // /dev/input perms required). Fall back to evdev if the portal is
+            // unavailable or rejects the bind. Done off the setup thread so
+            // window creation never waits on D-Bus IPC — the UI just sees
+            // capture_method=None initially and updates via ptt:state.
+            let runtime_for_init = ptt_runtime.clone();
+            let app_for_init = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let portal_fut = crate::ptt::portal_listener::try_start(
+                    runtime_for_init.clone(),
+                    app_for_init.clone(),
+                );
+                let portal_result = tokio::time::timeout(
+                    std::time::Duration::from_secs(3),
+                    portal_fut,
+                ).await;
+                match portal_result {
+                    Ok(Ok(())) => {
+                        eprintln!("ptt: capture via xdg GlobalShortcuts portal");
+                        crate::ptt::set_capture_method(
+                            &app_for_init,
+                            &runtime_for_init,
+                            crate::ptt::CaptureMethod::Portal,
+                        );
+                    }
+                    Ok(Err(portal_err)) => {
+                        eprintln!("ptt: portal unavailable ({}), falling back to evdev", portal_err);
+                        crate::ptt::set_capture_method(
+                            &app_for_init,
+                            &runtime_for_init,
+                            crate::ptt::CaptureMethod::Evdev,
+                        );
+                        crate::ptt::evdev_listener::start(runtime_for_init, app_for_init);
+                    }
+                    Err(_) => {
+                        eprintln!("ptt: portal probe timed out, falling back to evdev");
+                        crate::ptt::set_capture_method(
+                            &app_for_init,
+                            &runtime_for_init,
+                            crate::ptt::CaptureMethod::Evdev,
+                        );
+                        crate::ptt::evdev_listener::start(runtime_for_init, app_for_init);
+                    }
+                }
+            });
 
             let cfg = app.state::<AppState>().config.lock().unwrap().clone();
             for ch in &cfg.channels {
@@ -1981,6 +2133,8 @@ pub fn run() {
             ptt_get_state,
             ptt_detect_wave_xlr,
             ptt_wave_xlr_present,
+            ptt_install_udev_rule,
+            ptt_configure_shortcuts,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

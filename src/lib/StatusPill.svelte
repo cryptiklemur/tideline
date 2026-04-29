@@ -5,7 +5,7 @@ import { onDestroy, onMount } from 'svelte';
 import Icon from './Icon.svelte';
 import type { PttState } from './types';
 
-let state = $state<PttState>({ mode: 'open', hold_active: false, transmitting: true, error: null });
+let state = $state<PttState>({ mode: 'open', hold_active: false, transmitting: true, error: null, capture_method: 'none' });
 let unlisten: UnlistenFn | null = null;
 
 onMount(async () => {

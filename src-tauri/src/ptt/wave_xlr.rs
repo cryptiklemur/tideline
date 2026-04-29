@@ -1,23 +1,19 @@
 use crate::ptt::state::LedColor;
-use hidapi::HidApi;
 
 const VID: u16 = 0x0fd9;
 const PID: u16 = 0x007d;
 
-// PROTOCOL NOTE: The Wave XLR mute-LED protocol is not publicly documented.
-// The byte sequences below are PLACEHOLDERS. To finish this feature, capture
-// USB traffic on Windows with Wireshark + USBPcap while toggling mute in
-// Wave Link, then derive the feature-report bytes for "set LED to red/blue".
+// LED control: the Wave XLR drives its own mute LED from the OS source-mute
+// state — when PipeWire reports the capture source as muted, the device
+// flips the LED to red on its own; unmute → blue. Since our PTT path mutes
+// the source via `pactl`, the LED already follows correctly without any
+// HID writes from us.
 //
-// The HID interface to address is the non-audio-control interface (usage
-// page typically 0xFF00 or similar — find it by enumerating interfaces and
-// skipping ones with usage_page in {0x000B (Consumer), 0x0001 (Generic)}).
-//
-// Until captured, set_led() is a no-op that returns Ok(()) so the rest of
-// the system keeps working.
-const PLACEHOLDER_RED:  [u8; 2] = [0x00, 0xff]; // TODO: replace
-const PLACEHOLDER_BLUE: [u8; 2] = [0x00, 0x00]; // TODO: replace
-const _: &str = "Replace placeholders with real bytes after USB capture.";
+// We keep `set_led()` as an explicit no-op so the rest of the effect
+// pipeline can stay symmetric (state.rs unconditionally emits a LedColor
+// in its Effects). If we ever want to override the device's native color
+// behavior, that would require capturing the proprietary HID protocol
+// (Elgato doesn't document it) — see git history for the previous stub.
 
 /// Returns true if a Wave XLR is currently enumerable on this machine.
 ///
@@ -45,21 +41,7 @@ pub fn is_present() -> bool {
     false
 }
 
-pub fn set_led(color: LedColor) -> Result<(), String> {
-    // HidApi::new() per call (not cached): caching trips E0597 because
-    // device_list()'s iterator Drop borrows &HidApi past the MutexGuard's
-    // release. ~5ms enumeration is fine for human-cadence LED toggles.
-    let api = HidApi::new().map_err(|e| e.to_string())?;
-    let info = api.device_list()
-        .find(|d| d.vendor_id() == VID && d.product_id() == PID
-                  && d.interface_number() != 0 // skip audio control interface
-                  && d.usage_page() != 0x0001 && d.usage_page() != 0x000B)
-        .ok_or("Wave XLR HID interface not found")?;
-    let dev = info.open_device(&api).map_err(|e| e.to_string())?;
-    let payload = match color { LedColor::Red => &PLACEHOLDER_RED, LedColor::Blue => &PLACEHOLDER_BLUE };
-    // TODO(usb-capture): replace with actual feature-report layout once known.
-    // Most Elgato HID devices use feature reports prefixed with a report id byte.
-    // Example shape: [report_id, 0x01 (set-led cmd), r, g, b, 0x00, ...]
-    dev.send_feature_report(payload).map_err(|e| e.to_string())?;
+pub fn set_led(_color: LedColor) -> Result<(), String> {
+    // Intentional no-op — see file-level comment.
     Ok(())
 }

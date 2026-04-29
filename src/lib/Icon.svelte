@@ -44,6 +44,7 @@ import Keyboard from '@lucide/svelte/icons/keyboard';
 import Palette from '@lucide/svelte/icons/palette';
 import Info from '@lucide/svelte/icons/info';
 import Cable from '@lucide/svelte/icons/cable';
+import ShieldCheck from '@lucide/svelte/icons/shield-check';
 
 export const ICONS = {
     headphones: Headphones,
@@ -91,6 +92,7 @@ export const ICONS = {
     palette: Palette,
     info: Info,
     cable: Cable,
+    'shield-check': ShieldCheck,
 } as const;
 
 export type IconName = keyof typeof ICONS;

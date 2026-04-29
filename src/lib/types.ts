@@ -98,9 +98,12 @@ export interface PttConfig {
     led_enabled: boolean;
 }
 
+export type CaptureMethod = 'none' | 'portal' | 'evdev';
+
 export interface PttState {
     mode: Mode;
     hold_active: boolean;
     transmitting: boolean; // mode==='open' || hold_active
     error: string | null;  // e.g., evdev permission failure
+    capture_method: CaptureMethod;
 }

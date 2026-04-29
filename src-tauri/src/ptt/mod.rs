@@ -2,6 +2,7 @@ pub mod binding;
 pub mod evdev_listener;
 pub mod mute;
 pub mod notify;
+pub mod portal_listener;
 pub mod state;
 pub mod tones;
 pub mod wave_xlr;
@@ -12,10 +13,25 @@ use state::Effects;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager};
 
-/// Runtime owned by Tauri's state, shared by the evdev listener and Tauri commands.
+/// Which capture path is providing PTT shortcuts. Determines what UI surface
+/// the Settings panel renders (portal info vs. raw evdev binding capture).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum CaptureMethod {
+    /// No listener active yet (startup, or both paths failed).
+    #[default]
+    None,
+    /// XDG GlobalShortcuts portal (Wayland-native).
+    Portal,
+    /// `/dev/input/event*` raw capture (legacy / fallback).
+    Evdev,
+}
+
+/// Runtime owned by Tauri's state, shared by listeners and Tauri commands.
 pub struct PttRuntime {
     pub state: Mutex<state::PttState>,
     pub last_error: Mutex<Option<String>>,
+    pub capture_method: Mutex<CaptureMethod>,
 }
 
 impl PttRuntime {
@@ -23,6 +39,7 @@ impl PttRuntime {
         Arc::new(Self {
             state: Mutex::new(state::PttState::new(cfg.ptt.mode)),
             last_error: Mutex::new(None),
+            capture_method: Mutex::new(CaptureMethod::None),
         })
     }
 }
@@ -33,17 +50,26 @@ pub struct PttStateEvent {
     pub hold_active: bool,
     pub transmitting: bool,
     pub error: Option<String>,
+    pub capture_method: CaptureMethod,
 }
 
 fn emit_state(app: &AppHandle, runtime: &PttRuntime) {
     let s = *runtime.state.lock().unwrap();
     let err = runtime.last_error.lock().unwrap().clone();
+    let method = *runtime.capture_method.lock().unwrap();
     let _ = app.emit("ptt:state", PttStateEvent {
         mode: s.mode,
         hold_active: s.hold_active,
         transmitting: s.transmitting(),
         error: err,
+        capture_method: method,
     });
+}
+
+/// Set which capture path is active and emit an updated state event.
+pub fn set_capture_method(app: &AppHandle, runtime: &PttRuntime, method: CaptureMethod) {
+    *runtime.capture_method.lock().unwrap() = method;
+    emit_state(app, runtime);
 }
 
 pub fn set_error(app: &AppHandle, runtime: &PttRuntime, msg: Option<String>) {

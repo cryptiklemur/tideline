@@ -1,28 +1,16 @@
 use crate::ptt::state::Tone;
 use rodio::{OutputStream, Sink, Source};
 use std::io::Cursor;
-use std::sync::Mutex;
-use std::time::{Duration, Instant};
 
 const MIC_UNMUTE_WAV: &[u8] = include_bytes!("../../assets/mic-unmute.wav");
 const MIC_MUTE_WAV:   &[u8] = include_bytes!("../../assets/mic-mute.wav");
 
-// Tones are ~285ms each; debounce slightly longer so a rapid press/release
-// doesn't queue overlapping cues.
-const DEBOUNCE: Duration = Duration::from_millis(300);
-
-static LAST_PLAYED: Mutex<Option<Instant>> = Mutex::new(None);
-
+/// Play a single short cue. Tones are ~90ms (single beep), short enough that
+/// a rapid press/release sequence plays both cleanly without overlap or
+/// debounce-induced drops. Each call spawns its own thread + sink so back-to-
+/// back tones can run concurrently if the user really hammers the key.
 pub fn play(tone: Tone, enabled: bool, volume_pct: u32) {
     if !enabled { return; }
-    let now = Instant::now();
-    {
-        let mut last = LAST_PLAYED.lock().unwrap();
-        if let Some(t) = *last {
-            if now.duration_since(t) < DEBOUNCE { return; }
-        }
-        *last = Some(now);
-    }
     let bytes = match tone { Tone::Up => MIC_UNMUTE_WAV, Tone::Down => MIC_MUTE_WAV };
     let v = (volume_pct as f32 / 100.0).clamp(0.0, 1.0);
     std::thread::spawn(move || {
