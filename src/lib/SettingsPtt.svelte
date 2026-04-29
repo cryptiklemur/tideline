@@ -114,7 +114,7 @@ async function autoDetect() {
     <label class="flex items-center gap-3 cursor-pointer w-fit">
         <input
             type="checkbox"
-            class="toggle toggle-md toggle-primary shrink-0"
+            class="checkbox checkbox-sm checkbox-primary shrink-0"
             checked={config.ptt.tones_enabled}
             onchange={(e) => setTonesEnabled((e.currentTarget as HTMLInputElement).checked)}
         />
