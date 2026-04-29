@@ -27,6 +27,9 @@ pub fn is_present() -> bool {
 }
 
 pub fn set_led(color: LedColor) -> Result<(), String> {
+    // HidApi::new() per call (not cached): caching trips E0597 because
+    // device_list()'s iterator Drop borrows &HidApi past the MutexGuard's
+    // release. ~5ms enumeration is fine for human-cadence LED toggles.
     let api = HidApi::new().map_err(|e| e.to_string())?;
     let info = api.device_list()
         .find(|d| d.vendor_id() == VID && d.product_id() == PID
