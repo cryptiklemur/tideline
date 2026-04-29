@@ -1,10 +1,13 @@
 use crate::ptt::binding::{Binding, Modifier};
-use crate::ptt::PttRuntime;
-use evdev::{Device, EventType, KeyCode};
-use std::collections::HashSet;
+use crate::ptt::{handle_press, handle_release, handle_toggle, set_error, PttRuntime};
+use crate::AppState;
+use evdev::{Device, EventSummary, EventType, KeyCode};
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use tauri::AppHandle;
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
+use tauri::{AppHandle, Manager};
 
 const MODIFIER_KEYS: &[(KeyCode, Modifier)] = &[
     (KeyCode::KEY_LEFTCTRL,  Modifier::Ctrl),
@@ -133,16 +136,6 @@ pub(crate) fn key_to_binding(k: KeyCode, mods: &HashSet<Modifier>) -> Option<Bin
     None
 }
 
-use crate::ptt::{handle_press, handle_release, handle_toggle, set_error};
-use crate::AppState;
-use evdev::EventSummary;
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
-use std::thread;
-use std::time::Duration;
-use tauri::Manager;
-
 struct Shared {
     runtime: Arc<PttRuntime>,
     app: AppHandle,
@@ -168,28 +161,26 @@ pub fn start(runtime: Arc<PttRuntime>, app: AppHandle) {
 }
 
 fn rescan_loop(shared: Arc<Shared>) {
-    let mut active: HashMap<PathBuf, Arc<AtomicBool>> = HashMap::new();
+    let mut active: HashSet<PathBuf> = HashSet::new();
     loop {
         let devices = enumerate_input_devices();
         for path in &devices {
-            if !active.contains_key(path) {
-                let cancel = Arc::new(AtomicBool::new(false));
+            if active.insert(path.clone()) {
                 let path_owned = path.clone();
                 let shared = shared.clone();
-                let cancel_clone = cancel.clone();
-                thread::spawn(move || device_loop(&path_owned, shared, cancel_clone));
-                active.insert(path.clone(), cancel);
+                thread::spawn(move || device_loop(&path_owned, shared));
             }
         }
-        // GC entries whose device disappeared
-        active.retain(|p, _| p.exists());
+        // GC entries whose device disappeared (the device thread exits on its own
+        // via fetch_events error; this just lets us re-spawn if it comes back).
+        active.retain(|p| p.exists());
         thread::sleep(Duration::from_secs(5));
     }
 }
 
-fn device_loop(path: &Path, shared: Arc<Shared>, cancel: Arc<AtomicBool>) {
+fn device_loop(path: &Path, shared: Arc<Shared>) {
     let Ok(mut dev) = Device::open(path) else { return; };
-    while !cancel.load(Ordering::SeqCst) {
+    loop {
         let events = match dev.fetch_events() {
             Ok(it) => it,
             Err(_) => return, // device gone
@@ -213,19 +204,14 @@ fn handle_key_event(shared: &Shared, k: KeyCode, value: i32) {
         return;
     }
 
-    // Update keys_down set
+    // Update keys_down set; on press, dedupe duplicate reports across devices.
     let raw_code = k.code();
-    let was_down = {
-        let mut kd = shared.keys_down.lock().unwrap();
-        if value == 1 {
-            let inserted = kd.insert(raw_code);
-            !inserted // was_down = !inserted (true if it was already in the set)
-        } else {
-            let was = kd.remove(&raw_code);
-            !was // was_down = !was; if it wasn't down, it's also not interesting
-        }
-    };
-    if value == 1 && was_down { return; } // dedupe between multiple devices reporting the same key
+    if value == 1 {
+        let inserted = shared.keys_down.lock().unwrap().insert(raw_code);
+        if !inserted { return; } // already down; another device just reported the same press
+    } else {
+        shared.keys_down.lock().unwrap().remove(&raw_code);
+    }
 
     let mods_snapshot = { shared.mods.lock().unwrap().clone() };
     let Some(observed) = key_to_binding(k, &mods_snapshot) else { return; };
