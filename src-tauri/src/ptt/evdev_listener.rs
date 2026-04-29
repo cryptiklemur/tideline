@@ -41,9 +41,9 @@ pub fn enumerate_input_devices() -> Vec<PathBuf> {
 pub fn probe_permission() -> Result<(), String> {
     let dir = Path::new("/dev/input");
     let Ok(mut entries) = std::fs::read_dir(dir) else {
-        return Err(format!(
-            "Cannot read /dev/input. Add yourself to the input group, then log out and back in:\n\n  sudo usermod -aG input $USER"
-        ));
+        return Err(
+            "Cannot read /dev/input. Add yourself to the input group, then log out and back in:\n\n  sudo usermod -aG input $USER".to_string()
+        );
     };
     // Try to actually open one event device to detect EACCES vs ENOENT
     while let Some(Ok(entry)) = entries.next() {
@@ -131,6 +131,125 @@ pub(crate) fn key_to_binding(k: KeyCode, mods: &HashSet<Modifier>) -> Option<Bin
         return Some(Binding::Keyboard { mods: canonical_mods, key: key.to_string() });
     }
     None
+}
+
+use crate::ptt::{handle_press, handle_release, handle_toggle, set_error};
+use crate::AppState;
+use evdev::EventSummary;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
+use std::thread;
+use std::time::Duration;
+use tauri::Manager;
+
+struct Shared {
+    runtime: Arc<PttRuntime>,
+    app: AppHandle,
+    mods: Mutex<HashSet<Modifier>>,
+    /// Set of physical keys currently held (so we can debounce repeats and
+    /// detect releases of the binding key). Stored as raw evdev codes.
+    keys_down: Mutex<HashSet<u16>>,
+}
+
+pub fn start(runtime: Arc<PttRuntime>, app: AppHandle) {
+    if let Err(msg) = probe_permission() {
+        set_error(&app, &runtime, Some(msg));
+        // We still spawn the rescan loop; if the user fixes permissions
+        // and restarts (or we re-probe later) it'll start working.
+    }
+    let shared = Arc::new(Shared {
+        runtime,
+        app,
+        mods: Mutex::new(HashSet::new()),
+        keys_down: Mutex::new(HashSet::new()),
+    });
+    thread::spawn(move || rescan_loop(shared));
+}
+
+fn rescan_loop(shared: Arc<Shared>) {
+    let mut active: HashMap<PathBuf, Arc<AtomicBool>> = HashMap::new();
+    loop {
+        let devices = enumerate_input_devices();
+        for path in &devices {
+            if !active.contains_key(path) {
+                let cancel = Arc::new(AtomicBool::new(false));
+                let path_owned = path.clone();
+                let shared = shared.clone();
+                let cancel_clone = cancel.clone();
+                thread::spawn(move || device_loop(&path_owned, shared, cancel_clone));
+                active.insert(path.clone(), cancel);
+            }
+        }
+        // GC entries whose device disappeared
+        active.retain(|p, _| p.exists());
+        thread::sleep(Duration::from_secs(5));
+    }
+}
+
+fn device_loop(path: &Path, shared: Arc<Shared>, cancel: Arc<AtomicBool>) {
+    let Ok(mut dev) = Device::open(path) else { return; };
+    while !cancel.load(Ordering::SeqCst) {
+        let events = match dev.fetch_events() {
+            Ok(it) => it,
+            Err(_) => return, // device gone
+        };
+        for ev in events {
+            if let EventSummary::Key(_, k, value) = ev.destructure() {
+                handle_key_event(&shared, k, value);
+            }
+        }
+    }
+}
+
+fn handle_key_event(shared: &Shared, k: KeyCode, value: i32) {
+    // value: 0 = release, 1 = press, 2 = autorepeat
+    if value == 2 { return; } // ignore repeats; we already know the key is down
+
+    // Update modifier state
+    if let Some(m) = modifier_for_key(k) {
+        let mut mods = shared.mods.lock().unwrap();
+        if value == 1 { mods.insert(m); } else { mods.remove(&m); }
+        return;
+    }
+
+    // Update keys_down set
+    let raw_code = k.code();
+    let was_down = {
+        let mut kd = shared.keys_down.lock().unwrap();
+        if value == 1 {
+            let inserted = kd.insert(raw_code);
+            !inserted // was_down = !inserted (true if it was already in the set)
+        } else {
+            let was = kd.remove(&raw_code);
+            !was // was_down = !was; if it wasn't down, it's also not interesting
+        }
+    };
+    if value == 1 && was_down { return; } // dedupe between multiple devices reporting the same key
+
+    let mods_snapshot = { shared.mods.lock().unwrap().clone() };
+    let Some(observed) = key_to_binding(k, &mods_snapshot) else { return; };
+
+    // Snapshot current bindings
+    let cfg = { shared.app.state::<AppState>().config.lock().unwrap().clone() };
+    let toggle = cfg.ptt.mode_toggle_binding.as_ref();
+    let hold   = cfg.ptt.hold_binding.as_ref();
+
+    if value == 1 { // press
+        if let Some(t) = toggle { if *t == observed { handle_toggle(&shared.app, &shared.runtime); return; } }
+        if let Some(h) = hold   { if *h == observed { handle_press(&shared.app, &shared.runtime); } }
+    } else if value == 0 { // release
+        if let Some(h) = hold {
+            // Match release on the main key alone (modifier release order is unreliable),
+            // i.e., compare just the key/button slot of the binding.
+            let key_match = match (h, &observed) {
+                (Binding::Keyboard { key: hk, .. }, Binding::Keyboard { key: ok, .. }) => hk == ok,
+                (Binding::Mouse    { button: hb, .. }, Binding::Mouse    { button: ob, .. }) => hb == ob,
+                _ => false,
+            };
+            if key_match { handle_release(&shared.app, &shared.runtime); }
+        }
+    }
 }
 
 #[cfg(test)]
