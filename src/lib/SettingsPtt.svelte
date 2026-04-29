@@ -111,10 +111,10 @@ async function autoDetect() {
 
 <section class="flex flex-col gap-2">
     <h4 class="text-[10px] font-bold uppercase tracking-widest text-base-content/55 m-0">PTT tones</h4>
-    <label class="flex items-center gap-2 cursor-pointer">
+    <label class="flex items-center gap-3 cursor-pointer w-fit">
         <input
             type="checkbox"
-            class="toggle toggle-primary"
+            class="toggle toggle-md toggle-primary shrink-0"
             checked={config.ptt.tones_enabled}
             onchange={(e) => setTonesEnabled((e.currentTarget as HTMLInputElement).checked)}
         />
