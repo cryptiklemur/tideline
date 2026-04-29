@@ -105,14 +105,19 @@ async function autoDetect() {
         </button>
     </div>
     {#if !waveXlrPresent && config.ptt.input_device.toLowerCase().includes('wave')}
-        <p class="text-xs text-warning leading-snug">Wave XLR not currently visible to hidapi — LED control will silently fail.</p>
+        <p class="text-xs text-warning leading-snug">Wave XLR not currently detected on USB — mute will fail until it's plugged back in.</p>
     {/if}
 </section>
 
 <section class="flex flex-col gap-2">
     <h4 class="text-[10px] font-bold uppercase tracking-widest text-base-content/55 m-0">PTT tones</h4>
-    <label class="flex items-center gap-2">
-        <input type="checkbox" class="toggle toggle-sm toggle-primary" checked={config.ptt.tones_enabled} onchange={(e) => setTonesEnabled((e.target as HTMLInputElement).checked)} />
+    <label class="flex items-center gap-2 cursor-pointer">
+        <input
+            type="checkbox"
+            class="toggle toggle-primary"
+            checked={config.ptt.tones_enabled}
+            onchange={(e) => setTonesEnabled((e.currentTarget as HTMLInputElement).checked)}
+        />
         <span class="text-sm">Play a short cue on press / release</span>
     </label>
     <label class="flex items-center gap-2">

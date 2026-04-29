@@ -14,9 +14,9 @@
       {
         "title": "Tideline",
         "width": 1300,
-        "height": 600,
+        "height": 720,
         "minWidth": 690,
-        "minHeight": 460,
+        "minHeight": 560,
         "resizable": true,
         "decorations": false,
         "transparent": false

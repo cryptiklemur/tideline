@@ -20,10 +20,29 @@ const PLACEHOLDER_BLUE: [u8; 2] = [0x00, 0x00]; // TODO: replace
 const _: &str = "Replace placeholders with real bytes after USB capture.";
 
 /// Returns true if a Wave XLR is currently enumerable on this machine.
+///
+/// Walks `/sys/bus/usb/devices/*/idVendor + idProduct` rather than using
+/// hidapi: the Wave XLR exposes only Audio + Vendor-specific interfaces
+/// (no HID), so hidapi's enumeration would always return false even with
+/// the device plugged in. Sysfs is unprivileged and reliable on Linux.
 pub fn is_present() -> bool {
-    let Ok(api) = HidApi::new() else { return false; };
-    let found = api.device_list().any(|d| d.vendor_id() == VID && d.product_id() == PID);
-    found
+    let entries = match std::fs::read_dir("/sys/bus/usb/devices") {
+        Ok(e) => e,
+        Err(_) => return false,
+    };
+    let want_vid = format!("{:04x}", VID);
+    let want_pid = format!("{:04x}", PID);
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let vid = std::fs::read_to_string(path.join("idVendor")).ok();
+        let pid = std::fs::read_to_string(path.join("idProduct")).ok();
+        if let (Some(v), Some(p)) = (vid, pid) {
+            if v.trim().eq_ignore_ascii_case(&want_vid) && p.trim().eq_ignore_ascii_case(&want_pid) {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 pub fn set_led(color: LedColor) -> Result<(), String> {
