@@ -35,16 +35,13 @@ pub struct SinkInput {
     pub volume: u32,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ChannelKind {
+    #[default]
     Output,
     Input,
     PhysicalInput,
-}
-
-impl Default for ChannelKind {
-    fn default() -> Self { ChannelKind::Output }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -82,11 +79,9 @@ pub enum KeybindAction {
     ToggleMixEnabled { mix_id: String },
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum Mode { Open, Ptt }
-
-impl Default for Mode { fn default() -> Self { Mode::Open } }
+pub enum Mode { #[default] Open, Ptt }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PttConfig {
@@ -938,9 +933,7 @@ fn try_soft_apply(old: &AppConfig, new: &AppConfig) -> Option<Vec<ChannelCfg>> {
     let new_by_name: HashMap<&str, &ChannelCfg> =
         new.channels.iter().map(|c| (c.name.as_str(), c)).collect();
     for old_ch in &old.channels {
-        let Some(new_ch) = new_by_name.get(old_ch.name.as_str()) else {
-            return None;
-        };
+        let new_ch = new_by_name.get(old_ch.name.as_str())?;
         if !channel_settings_equal(old_ch, new_ch) {
             return None;
         }
@@ -1759,6 +1752,7 @@ fn refresh_tray_menu(app: &AppHandle<Wry>) {
 }
 
 #[cfg(target_os = "linux")]
+#[allow(dead_code)]
 mod glog_filter {
     use std::ffi::{c_char, c_void, CStr};
 

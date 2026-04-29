@@ -91,7 +91,7 @@ mod tests {
     #[test] fn hold_noop_in_open() {
         let mut s = PttState::new(Mode::Open);
         let fx = hold_press(&mut s);
-        assert_eq!(s.hold_active, false);
+        assert!(!s.hold_active);
         assert_eq!(fx, Effects::empty());
         let fx = hold_release(&mut s);
         assert_eq!(fx, Effects::empty());

@@ -2,7 +2,7 @@ use crate::ptt::binding::{Binding, Modifier};
 use crate::ptt::{handle_press, handle_release, handle_toggle, set_error, PttRuntime};
 use crate::AppState;
 use evdev::{Device, EventSummary, EventType, KeyCode};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::thread;
