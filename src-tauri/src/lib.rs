@@ -446,6 +446,23 @@ fn fetch_sources() -> Vec<SourceInfo> {
         .collect()
 }
 
+/// Returns the PipeWire/Pulse capture node name whose product description
+/// contains "Wave XLR", or None if not present.
+fn detect_wave_xlr_capture_node() -> Option<String> {
+    let raw = pactl_output(&["-f", "json", "list", "sources"]);
+    let json: serde_json::Value = serde_json::from_str(&raw).unwrap_or_default();
+    for item in json.as_array().unwrap_or(&vec![]) {
+        let name = item["name"].as_str().unwrap_or("");
+        if name.ends_with(".monitor") || name.is_empty() { continue; }
+        let desc = item["description"].as_str().unwrap_or("");
+        let product = item["properties"]["device.product.name"].as_str().unwrap_or("");
+        if desc.contains("Wave XLR") || product.contains("Wave XLR") {
+            return Some(name.to_string());
+        }
+    }
+    None
+}
+
 fn amixer_output(args: &[&str]) -> String {
     Command::new("amixer")
         .args(args)
@@ -1607,6 +1624,89 @@ fn window_drag(window: tauri::Window) -> Result<(), String> {
     window.start_dragging().map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn ptt_set_mode_toggle_binding(
+    binding: Option<crate::ptt::binding::Binding>,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    {
+        let mut cfg = state.config.lock().unwrap();
+        cfg.ptt.mode_toggle_binding = binding;
+        save_config_to_disk(&cfg)?;
+    }
+    let runtime = app.state::<Arc<crate::ptt::PttRuntime>>().inner().clone();
+    crate::ptt::set_error(&app, &runtime, runtime.last_error.lock().unwrap().clone());
+    Ok(())
+}
+
+#[tauri::command]
+fn ptt_set_hold_binding(
+    binding: Option<crate::ptt::binding::Binding>,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    {
+        let mut cfg = state.config.lock().unwrap();
+        cfg.ptt.hold_binding = binding;
+        save_config_to_disk(&cfg)?;
+    }
+    let runtime = app.state::<Arc<crate::ptt::PttRuntime>>().inner().clone();
+    crate::ptt::set_error(&app, &runtime, runtime.last_error.lock().unwrap().clone());
+    Ok(())
+}
+
+#[tauri::command]
+fn ptt_set_input_device(device: String, state: State<'_, AppState>) -> Result<(), String> {
+    let mut cfg = state.config.lock().unwrap();
+    cfg.ptt.input_device = device;
+    save_config_to_disk(&cfg)
+}
+
+#[tauri::command]
+fn ptt_set_tones_enabled(enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
+    let mut cfg = state.config.lock().unwrap();
+    cfg.ptt.tones_enabled = enabled;
+    save_config_to_disk(&cfg)
+}
+
+#[tauri::command]
+fn ptt_set_tones_volume(volume: u32, state: State<'_, AppState>) -> Result<(), String> {
+    let v = volume.min(100);
+    let mut cfg = state.config.lock().unwrap();
+    cfg.ptt.tones_volume = v;
+    save_config_to_disk(&cfg)
+}
+
+#[tauri::command]
+fn ptt_toggle_mode(app: AppHandle) {
+    let runtime = app.state::<Arc<crate::ptt::PttRuntime>>().inner().clone();
+    crate::ptt::handle_toggle(&app, &runtime);
+}
+
+#[tauri::command]
+fn ptt_get_state(app: AppHandle) -> crate::ptt::PttStateEvent {
+    let runtime = app.state::<Arc<crate::ptt::PttRuntime>>().inner().clone();
+    let s = *runtime.state.lock().unwrap();
+    let err = runtime.last_error.lock().unwrap().clone();
+    crate::ptt::PttStateEvent {
+        mode: s.mode,
+        hold_active: s.hold_active,
+        transmitting: s.transmitting(),
+        error: err,
+    }
+}
+
+#[tauri::command]
+fn ptt_detect_wave_xlr() -> Option<String> {
+    detect_wave_xlr_capture_node()
+}
+
+#[tauri::command]
+fn ptt_wave_xlr_present() -> bool {
+    crate::ptt::wave_xlr::is_present()
+}
+
 fn build_tray_menu(
     app: &AppHandle<Wry>,
     cfg: &AppConfig,
@@ -1745,6 +1845,22 @@ pub fn run() {
             routing::spawn(app.handle().clone());
             register_all_keybinds(app.handle());
 
+            let cfg_snapshot = app.state::<AppState>().config.lock().unwrap().clone();
+            let ptt_runtime = crate::ptt::PttRuntime::from_config(&cfg_snapshot);
+            app.manage(ptt_runtime.clone());
+            // Auto-detect Wave XLR on first run if no input_device is set
+            {
+                let st = app.state::<AppState>();
+                let mut cfg = st.config.lock().unwrap();
+                if cfg.ptt.input_device.is_empty() {
+                    if let Some(node) = detect_wave_xlr_capture_node() {
+                        cfg.ptt.input_device = node;
+                        let _ = save_config_to_disk(&cfg);
+                    }
+                }
+            }
+            crate::ptt::evdev_listener::start(ptt_runtime, app.handle().clone());
+
             let cfg = app.state::<AppState>().config.lock().unwrap().clone();
             for ch in &cfg.channels {
                 if ch.kind == ChannelKind::PhysicalInput {
@@ -1860,6 +1976,15 @@ pub fn run() {
             get_all_channel_volumes,
             set_channel_master_volume,
             set_channel_mix_volume,
+            ptt_set_mode_toggle_binding,
+            ptt_set_hold_binding,
+            ptt_set_input_device,
+            ptt_set_tones_enabled,
+            ptt_set_tones_volume,
+            ptt_toggle_mode,
+            ptt_get_state,
+            ptt_detect_wave_xlr,
+            ptt_wave_xlr_present,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
