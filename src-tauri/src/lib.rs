@@ -1636,7 +1636,8 @@ fn ptt_set_mode_toggle_binding(
         save_config_to_disk(&cfg)?;
     }
     let runtime = app.state::<Arc<crate::ptt::PttRuntime>>().inner().clone();
-    crate::ptt::set_error(&app, &runtime, runtime.last_error.lock().unwrap().clone());
+    let err = runtime.last_error.lock().unwrap().clone();
+    crate::ptt::set_error(&app, &runtime, err);
     Ok(())
 }
 
@@ -1652,7 +1653,8 @@ fn ptt_set_hold_binding(
         save_config_to_disk(&cfg)?;
     }
     let runtime = app.state::<Arc<crate::ptt::PttRuntime>>().inner().clone();
-    crate::ptt::set_error(&app, &runtime, runtime.last_error.lock().unwrap().clone());
+    let err = runtime.last_error.lock().unwrap().clone();
+    crate::ptt::set_error(&app, &runtime, err);
     Ok(())
 }
 
