@@ -1,6 +1,6 @@
 <script lang="ts">
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import { onDestroy } from 'svelte';
+import { onDestroy, type Snippet } from 'svelte';
 import Icon from './Icon.svelte';
 import HFader from './HFader.svelte';
 import { portal } from './portal';
@@ -12,9 +12,10 @@ interface Props {
     onSelect: (name: string) => void;
     onToggleMute: (out: SinkInfo) => void;
     onSetVolume: (out: SinkInfo, vol: number) => void;
+    extra?: Snippet;
 }
 
-let { out, isActive, onSelect, onToggleMute, onSetVolume }: Props = $props();
+let { out, isActive, onSelect, onToggleMute, onSetVolume, extra }: Props = $props();
 
 const METER_FLOOR_DB = -60;
 const PEAK_HOLD_MS = 1200;
@@ -192,6 +193,7 @@ onDestroy(() => {
     >
         <Icon name={out.muted ? 'volume-mute' : 'volume'} size={12} />
     </button>
+    {#if extra}<span class="ml-1 self-center flex-shrink-0">{@render extra()}</span>{/if}
 </li>
 
 {#if hovered}

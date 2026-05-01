@@ -1,7 +1,7 @@
 <script lang="ts">
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import { onMount, onDestroy } from 'svelte';
+import { onMount, onDestroy, type Snippet } from 'svelte';
 import ChannelIcon from './ChannelIcon.svelte';
 import Icon from './Icon.svelte';
 import HFader from './HFader.svelte';
@@ -14,9 +14,10 @@ interface Props {
     meterSource: string;
     sinkName: string;
     onSelect: (name: string) => void;
+    extra?: Snippet;
 }
 
-let { inp, isActive, meterSource, sinkName, onSelect }: Props = $props();
+let { inp, isActive, meterSource, sinkName, onSelect, extra }: Props = $props();
 
 const METER_FLOOR_DB = -60;
 const PEAK_HOLD_MS = 1200;
@@ -271,6 +272,7 @@ let kindLabel = $derived(inp.kind === 'physical_input' ? 'Hardware mic' : 'Virtu
     >
         <Icon name={muted ? 'volume-mute' : 'volume'} size={12} />
     </button>
+    {#if extra}<span class="ml-1 self-center flex-shrink-0">{@render extra()}</span>{/if}
 </li>
 
 {#if hovered}

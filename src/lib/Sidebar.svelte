@@ -1,4 +1,5 @@
 <script lang="ts">
+import type { Snippet } from 'svelte';
 import Icon from './Icon.svelte';
 import SidebarOutputRow from './SidebarOutputRow.svelte';
 import SidebarInputRow from './SidebarInputRow.svelte';
@@ -23,6 +24,8 @@ interface Props {
     inputMeterSource: (inp: ChannelConfig) => string;
     inputSinkName: (inp: ChannelConfig) => string;
     onSettings: () => void;
+    inputBadgeFor?: Snippet<[ChannelConfig]>;
+    outputBadgeFor?: Snippet<[SinkInfo]>;
 }
 
 let {
@@ -44,6 +47,8 @@ let {
     inputMeterSource,
     inputSinkName,
     onSettings,
+    inputBadgeFor,
+    outputBadgeFor,
 }: Props = $props();
 
 const itemBase = 'w-full flex items-center gap-2 px-3 py-1.5 bg-transparent border-none border-l-2 text-sm font-medium text-left cursor-pointer transition-colors min-w-0';
@@ -70,12 +75,16 @@ const itemActive = 'border-l-primary bg-primary/15 text-base-content [&_.nav-ico
             {:else}
                 <ul class="list-none flex flex-col m-0 p-0">
                     {#each inputs as inp (inp.name)}
+                        {#snippet inputExtra()}
+                            {#if inputBadgeFor}{@render inputBadgeFor(inp)}{/if}
+                        {/snippet}
                         <SidebarInputRow
                             {inp}
                             isActive={activeView === 'input' && selectedInput === inp.name}
                             meterSource={inputMeterSource(inp)}
                             sinkName={inputSinkName(inp)}
                             onSelect={onSelectInput}
+                            extra={inputBadgeFor ? inputExtra : undefined}
                         />
                     {/each}
                 </ul>
@@ -91,12 +100,16 @@ const itemActive = 'border-l-primary bg-primary/15 text-base-content [&_.nav-ico
             {:else}
                 <ul class="list-none flex flex-col m-0 p-0">
                     {#each outputs as out (out.name)}
+                        {#snippet outputExtra()}
+                            {#if outputBadgeFor}{@render outputBadgeFor(out)}{/if}
+                        {/snippet}
                         <SidebarOutputRow
                             {out}
                             isActive={activeView === 'output' && selectedOutput === out.name}
                             onSelect={onSelectOutput}
                             onToggleMute={onToggleOutputMute}
                             onSetVolume={onSetOutputVolume}
+                            extra={outputBadgeFor ? outputExtra : undefined}
                         />
                     {/each}
                 </ul>

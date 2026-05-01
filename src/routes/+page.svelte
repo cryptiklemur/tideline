@@ -1,6 +1,6 @@
 <script lang="ts">
 import { invoke } from '@tauri-apps/api/core';
-import { onMount } from 'svelte';
+import { onMount, onDestroy } from 'svelte';
 import MatrixRow from '$lib/MatrixRow.svelte';
 import AddChannelModal from '$lib/AddChannelModal.svelte';
 import AddInputModal from '$lib/AddInputModal.svelte';
@@ -17,6 +17,8 @@ import Sidebar from '$lib/Sidebar.svelte';
 import StatusPill from '$lib/StatusPill.svelte';
 import Toaster from '$lib/Toaster.svelte';
 import { toaster } from '$lib/toaster.svelte';
+import ChannelOverlay from '$lib/plugin-ui/ChannelOverlay.svelte';
+import { pluginUi } from '$lib/plugin-ui/pluginUi.svelte';
 import type { AppConfig, AudioBackendStatus, ChannelConfig, ChannelKind, ChannelVolumes, KeybindAction, Mix, SinkInfo } from '$lib/types';
 
 type View = 'mixes' | 'input' | 'output' | 'mix';
@@ -86,6 +88,22 @@ let activeMix = $derived(
         : null,
 );
 
+function overlaysFor(channelId: string, placement: 'detail' | 'sidebar_badge' | 'header_chip') {
+    return pluginUi.contributions.channel_overlays.filter((o) => {
+        if (o.placement !== placement) return false;
+        if (o.channel_filter.kind === 'all') return true;
+        return o.channel_filter.ids.includes(channelId);
+    });
+}
+
+let activeChannelId = $derived(
+    activeView === 'input' && selectedInput
+        ? inputs.find(i => i.name === selectedInput)?.uuid ?? null
+        : null,
+);
+let detailOverlays = $derived(activeChannelId ? overlaysFor(activeChannelId, 'detail') : []);
+let headerChips = $derived(activeChannelId ? overlaysFor(activeChannelId, 'header_chip') : []);
+
 $effect(() => {
     if (activeView === 'input' && selectedInput && !inputs.some(i => i.name === selectedInput)) {
         activeView = 'mixes';
@@ -114,6 +132,7 @@ let settingsForIndex = $state<number | null>(null);
 let settingsForChannel = $derived(settingsForIndex !== null ? config.channels[settingsForIndex] ?? null : null);
 
 onMount(() => {
+    void pluginUi.init();
     invoke<AppConfig>('get_config').then(c => { config = c; });
     invoke<Record<string, boolean>>('get_mix_enabled').then(m => { mixEnabled = m; });
     invoke<SinkInfo[]>('list_sinks').then(s => { outputs = s; }).catch(() => {});
@@ -418,6 +437,8 @@ async function clearKeybind(accelerator: string) {
     const { [accelerator]: _, ...rest } = config.keybinds;
     config = { ...config, keybinds: rest };
 }
+
+onDestroy(() => pluginUi.teardown());
 </script>
 
 <div class="flex flex-col h-full bg-base-100">
@@ -432,6 +453,19 @@ async function clearKeybind(accelerator: string) {
             <span class="text-base-content/55 overflow-hidden text-ellipsis whitespace-nowrap min-w-0" title={pipewireError}>{pipewireError.slice(0, 80)}</span>
         </div>
     {/if}
+    {#snippet inputBadgeFor(input: ChannelConfig)}
+        {@const overlays = overlaysFor(input.uuid, 'sidebar_badge')}
+        {#each overlays as o (o.plugin_id + ':' + o.surface_id)}
+            <ChannelOverlay overlay={o} emit={(e) => pluginUi.emit(o.plugin_id, e)} />
+        {/each}
+    {/snippet}
+    {#snippet outputBadgeFor(output: SinkInfo)}
+        {@const overlays = overlaysFor(output.name, 'sidebar_badge')}
+        {#each overlays as o (o.plugin_id + ':' + o.surface_id)}
+            <ChannelOverlay overlay={o} emit={(e) => pluginUi.emit(o.plugin_id, e)} />
+        {/each}
+    {/snippet}
+
     <div class="flex flex-1 min-h-0">
         <Sidebar
             {inputs}
@@ -452,6 +486,8 @@ async function clearKeybind(accelerator: string) {
             inputMeterSource={meterSourceFor}
             inputSinkName={(ch) => ch.kind === 'physical_input' ? '' : `sink.${slug(ch.name)}`}
             onSettings={() => settingsOpen = true}
+            {inputBadgeFor}
+            {outputBadgeFor}
         />
 
         <main class="flex-1 flex flex-col min-w-0 min-h-0 bg-base-100">
@@ -590,6 +626,13 @@ async function clearKeybind(accelerator: string) {
                                    : 'text-primary bg-primary/15 border-primary'}">
                         {activeInput.kind === 'physical_input' ? 'Hardware mic' : 'Virtual mic'}
                     </span>
+                    {#if headerChips.length > 0}
+                        <div class="flex items-center gap-1">
+                            {#each headerChips as o (o.plugin_id + ':' + o.surface_id)}
+                                <ChannelOverlay overlay={o} emit={(e) => pluginUi.emit(o.plugin_id, e)} />
+                            {/each}
+                        </div>
+                    {/if}
                 </header>
                 <div class="flex-1 p-4 overflow-y-auto">
                     <InputDetail
@@ -603,6 +646,9 @@ async function clearKeybind(accelerator: string) {
                         onRemoveSource={(s) => removeSource(inputIndex, s)}
                         onDelete={() => deleteChannel(inputIndex)}
                     />
+                    {#each detailOverlays as o (o.plugin_id + ':' + o.surface_id)}
+                        <ChannelOverlay overlay={o} emit={(e) => pluginUi.emit(o.plugin_id, e)} />
+                    {/each}
                 </div>
             {:else if activeOutput}
                 <header class="flex items-center justify-between gap-3 px-4 py-3 border-b border-base-content/15 flex-shrink-0">
