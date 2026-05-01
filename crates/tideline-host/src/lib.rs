@@ -2,6 +2,7 @@
 
 pub mod capabilities;
 pub mod events;
+pub mod install;
 pub mod logging;
 pub mod manifest;
 pub mod paths;
