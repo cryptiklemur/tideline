@@ -10,6 +10,7 @@ export type OutputMode = 'headphones' | 'speakers' | 'both';
 export type ChannelKind = 'output' | 'input' | 'physical_input';
 
 export interface ChannelConfig {
+    uuid: string;
     name: string;
     kind: ChannelKind;
     hp_node: string;
@@ -18,12 +19,15 @@ export interface ChannelConfig {
     sources: string[];
     physical_source: string;
     icon: string;
+    plugin_data?: Record<string, unknown>;
 }
 
 export interface Mix {
+    uuid: string;
     id: string;
     name: string;
     sinks: string[];
+    plugin_data?: Record<string, unknown>;
 }
 
 export type KeybindAction =

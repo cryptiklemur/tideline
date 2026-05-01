@@ -223,13 +223,14 @@ $effect(() => {
 
 function buildChannel(name: string, kind: ChannelKind, physical_source = ''): ChannelConfig {
     const s = slug(name);
+    const uuid = crypto.randomUUID();
     if (kind === 'output') {
-        return { name, kind, hp_node: `playback.${s}-hp`, sp_node: `playback.${s}-sp`, programs: [], sources: [], physical_source: '', icon: '' };
+        return { uuid, name, kind, hp_node: `playback.${s}-hp`, sp_node: `playback.${s}-sp`, programs: [], sources: [], physical_source: '', icon: '' };
     }
     if (kind === 'physical_input') {
-        return { name, kind, hp_node: '', sp_node: '', programs: [], sources: [], physical_source, icon: '' };
+        return { uuid, name, kind, hp_node: '', sp_node: '', programs: [], sources: [], physical_source, icon: '' };
     }
-    return { name, kind, hp_node: '', sp_node: '', programs: [], sources: [], physical_source: '', icon: '' };
+    return { uuid, name, kind, hp_node: '', sp_node: '', programs: [], sources: [], physical_source: '', icon: '' };
 }
 
 async function applyConfig(next: AppConfig) {
@@ -386,7 +387,7 @@ function mixIdFromName(name: string): string {
 
 async function addMix(name: string, sinks: string[]) {
     const id = mixIdFromName(name);
-    const next: AppConfig = { ...config, mixes: [...config.mixes, { id, name, sinks }] };
+    const next: AppConfig = { ...config, mixes: [...config.mixes, { uuid: crypto.randomUUID(), id, name, sinks }] };
     await applyConfig(next);
     activeView = 'mix';
     selectedMix = id;
