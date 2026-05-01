@@ -4,5 +4,6 @@
 
 pub mod binding;
 pub mod config_io;
+pub mod manifest;
 pub mod model;
 pub mod pipewire;
