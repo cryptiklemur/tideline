@@ -32,23 +32,18 @@ pub fn slug(name: &str) -> String {
 
 pub fn output_channel(name: &str) -> ChannelCfg {
     let s = slug(name);
-    ChannelCfg {
-        name: name.into(),
-        kind: ChannelKind::Output,
-        hp_node: format!("playback.{}-hp", s),
-        sp_node: format!("playback.{}-sp", s),
-        programs: Vec::new(),
-        sources: Vec::new(),
-        physical_source: String::new(),
-        icon: String::new(),
-    }
+    let mut ch = ChannelCfg::new(name);
+    ch.kind = ChannelKind::Output;
+    ch.hp_node = format!("playback.{}-hp", s);
+    ch.sp_node = format!("playback.{}-sp", s);
+    ch
 }
 
 pub fn default_config() -> AppConfig {
     AppConfig {
         mixes: vec![
-            Mix { id: "headphones".into(), name: "Headphones".into(), sinks: Vec::new() },
-            Mix { id: "speakers".into(),   name: "Speakers".into(),   sinks: Vec::new() },
+            Mix::new("headphones", "Headphones"),
+            Mix::new("speakers", "Speakers"),
         ],
         channels: vec![
             output_channel("Browser"),
@@ -69,18 +64,11 @@ pub fn migrate_config(cfg: &mut AppConfig, raw: &str) {
     };
     let hp = val.get("headphone_sink").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let sp = val.get("speaker_sink").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    cfg.mixes = vec![
-        Mix {
-            id: "headphones".into(),
-            name: "Headphones".into(),
-            sinks: if hp.is_empty() { Vec::new() } else { vec![hp] },
-        },
-        Mix {
-            id: "speakers".into(),
-            name: "Speakers".into(),
-            sinks: if sp.is_empty() { Vec::new() } else { vec![sp] },
-        },
-    ];
+    let mut hp_mix = Mix::new("headphones", "Headphones");
+    if !hp.is_empty() { hp_mix.sinks = vec![hp]; }
+    let mut sp_mix = Mix::new("speakers", "Speakers");
+    if !sp.is_empty() { sp_mix.sinks = vec![sp]; }
+    cfg.mixes = vec![hp_mix, sp_mix];
 }
 
 pub fn load_config() -> AppConfig {
