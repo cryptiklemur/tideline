@@ -201,3 +201,31 @@ mod tests {
         }
     }
 }
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PermissionsFile {
+    pub plugin_id: String,
+    pub granted: Vec<Capability>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PermissionsChangedParams {
+    pub granted: Vec<Capability>,
+}
+
+#[cfg(test)]
+mod permissions_tests {
+    use super::*;
+
+    #[test]
+    fn permissions_round_trip_toml() {
+        let file = PermissionsFile {
+            plugin_id: "io.tideline.test".into(),
+            granted: vec![Capability::ChannelRead, Capability::EventsPublish],
+        };
+        let s = toml::to_string(&file).unwrap();
+        let back: PermissionsFile = toml::from_str(&s).unwrap();
+        assert_eq!(back.plugin_id, "io.tideline.test");
+        assert_eq!(back.granted, vec![Capability::ChannelRead, Capability::EventsPublish]);
+    }
+}
