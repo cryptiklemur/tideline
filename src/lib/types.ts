@@ -33,7 +33,8 @@ export interface Mix {
 export type KeybindAction =
     | { type: 'toggle_output_mute'; sink: string }
     | { type: 'toggle_channel_mute'; channel: string }
-    | { type: 'toggle_mix_enabled'; mix_id: string };
+    | { type: 'toggle_mix_enabled'; mix_id: string }
+    | { type: 'plugin'; plugin_id: string; action_id: string };
 
 export interface AppConfig {
     mixes: Mix[];

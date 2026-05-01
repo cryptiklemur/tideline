@@ -1091,6 +1091,16 @@ fn execute_keybind(app: &AppHandle, action: &KeybindAction) {
             *state.mix_enabled.lock().unwrap() = map;
             refresh_tray_menu(app);
         }
+        KeybindAction::Plugin { plugin_id, action_id } => {
+            let registry = app.state::<Arc<tideline_host::PluginRegistry>>().inner().clone();
+            let plugin_id = plugin_id.clone();
+            let action_id = action_id.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = plugins::dispatch_plugin_keybind(&registry, &plugin_id, &action_id).await {
+                    eprintln!("plugin keybind dispatch failed: {e}");
+                }
+            });
+        }
     }
 }
 

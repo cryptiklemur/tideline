@@ -85,6 +85,7 @@ pub enum KeybindAction {
     ToggleOutputMute { sink: String },
     ToggleChannelMute { channel: String },
     ToggleMixEnabled { mix_id: String },
+    Plugin { plugin_id: String, action_id: String },
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
