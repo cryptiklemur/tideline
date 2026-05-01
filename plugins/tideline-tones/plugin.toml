@@ -1,0 +1,30 @@
+[plugin]
+id = "tideline-tones"
+name = "PTT Tones"
+version = "1.0.0"
+authors = ["aaron@cryptiklemur"]
+description = "Plays mic-mute / mic-unmute audio cues on PTT state changes."
+license = "MIT"
+
+[host]
+api = "^1.0"
+
+[entry]
+exec = "bin/tideline-tones"
+args = []
+autostart = true
+
+[capabilities]
+required = [
+  "audio.play",
+  "config.read",
+  "config.write.namespace",
+  "ui.settings_section",
+]
+optional = []
+
+[contributes]
+settings_sections = [
+  { id = "main", label = "PTT Tones", icon = "speaker-wave" },
+]
+published_events = []

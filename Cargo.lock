@@ -4413,6 +4413,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "tideline-tones"
+version = "1.0.0"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "rodio",
+ "serde",
+ "serde_json",
+ "tideline-sdk",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "time"
 version = "0.3.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"

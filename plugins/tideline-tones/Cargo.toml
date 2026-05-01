@@ -1,0 +1,25 @@
+[package]
+name = "tideline-tones"
+version = "1.0.0"
+edition = "2021"
+description = "Tideline plugin: PTT mute/unmute audio cues"
+license = "MIT"
+
+[lib]
+name = "tideline_tones"
+path = "src/lib.rs"
+
+[[bin]]
+name = "tideline-tones"
+path = "src/main.rs"
+
+[dependencies]
+tideline-sdk = { path = "../../crates/tideline-sdk" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-util", "sync", "time"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rodio = { version = "0.20", default-features = false, features = ["wav"] }
+base64 = "0.22"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
