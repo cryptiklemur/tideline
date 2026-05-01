@@ -1,3 +1,1 @@
-<script lang="ts">
-let _props = $props();
-</script>
+<div class="border-t border-base-content/10 my-2"></div>
