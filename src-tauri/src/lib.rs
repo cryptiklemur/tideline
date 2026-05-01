@@ -1525,6 +1525,26 @@ fn build_tray_menu(
         let sep = PredefinedMenuItem::separator(app)?;
         menu.append(&sep)?;
     }
+    let mut tray_items = if let Some(registry) = app.try_state::<Arc<tideline_host::PluginRegistry>>() {
+        let registry = registry.inner().clone();
+        tauri::async_runtime::block_on(registry.contributions()).tray_items
+    } else {
+        Vec::new()
+    };
+    tray_items.sort_by(|a, b| {
+        b.priority
+            .cmp(&a.priority)
+            .then_with(|| a.plugin_id.cmp(&b.plugin_id))
+    });
+    if !tray_items.is_empty() {
+        for item in &tray_items {
+            let id = format!("plugin:{}:{}", item.plugin_id, item.item_id);
+            let entry = MenuItem::with_id(app, id, &item.label, true, None::<&str>)?;
+            menu.append(&entry)?;
+        }
+        let sep = PredefinedMenuItem::separator(app)?;
+        menu.append(&sep)?;
+    }
     let open = MenuItem::with_id(app, "open", "Open Tideline", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
     menu.append(&open)?;
@@ -1655,6 +1675,14 @@ pub fn run() {
             });
             plugins::spawn_contributions_relay(app.handle(), plugin_registry.clone());
 
+            let mut tray_rx = plugin_registry.subscribe_contributions();
+            let app_handle_for_tray = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                while tray_rx.recv().await.is_ok() {
+                    refresh_tray_menu(&app_handle_for_tray);
+                }
+            });
+
             let cfg_snapshot = app.state::<AppState>().config.lock().unwrap().clone();
             let ptt_runtime = crate::ptt::PttRuntime::from_config(&cfg_snapshot);
             app.manage(ptt_runtime.clone());
@@ -1769,6 +1797,25 @@ pub fn run() {
                             apply_mix_enabled(&map, &cfg);
                             *state.mix_enabled.lock().unwrap() = map;
                             refresh_tray_menu(app);
+                        }
+                        s if s.starts_with("plugin:") => {
+                            let rest = &s["plugin:".len()..];
+                            if let Some((plugin_id, action_id)) = rest.split_once(':') {
+                                let registry = app
+                                    .state::<Arc<tideline_host::PluginRegistry>>()
+                                    .inner()
+                                    .clone();
+                                let plugin_id = plugin_id.to_string();
+                                let action_id = action_id.to_string();
+                                tauri::async_runtime::spawn(async move {
+                                    let _ = plugins::dispatch_plugin_keybind(
+                                        &registry,
+                                        &plugin_id,
+                                        &action_id,
+                                    )
+                                    .await;
+                                });
+                            }
                         }
                         _ => {}
                     }
