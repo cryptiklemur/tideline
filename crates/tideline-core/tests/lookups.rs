@@ -25,3 +25,25 @@ fn mix_by_id_and_uuid_for_id() {
     assert!(cfg.mix_by_id("nope").is_none());
     assert!(cfg.mix_uuid_for_id("nope").is_none());
 }
+
+#[test]
+fn remove_channel_by_uuid_keeps_others() {
+    let mut cfg = AppConfig::default();
+    cfg.channels.push(ChannelCfg::new("A"));
+    cfg.channels.push(ChannelCfg::new("B"));
+    let a_uuid = cfg.channels[0].uuid;
+    cfg.remove_channel_by_uuid(a_uuid);
+    assert_eq!(cfg.channels.len(), 1);
+    assert_eq!(cfg.channels[0].name, "B");
+}
+
+#[test]
+fn remove_mix_by_uuid_keeps_others() {
+    let mut cfg = AppConfig::default();
+    cfg.mixes.push(Mix::new("a", "A"));
+    cfg.mixes.push(Mix::new("b", "B"));
+    let a_uuid = cfg.mixes[0].uuid;
+    cfg.remove_mix_by_uuid(a_uuid);
+    assert_eq!(cfg.mixes.len(), 1);
+    assert_eq!(cfg.mixes[0].id, "b");
+}

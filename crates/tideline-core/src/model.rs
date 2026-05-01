@@ -158,4 +158,10 @@ impl AppConfig {
     pub fn mix_uuid_for_id(&self, id: &str) -> Option<Uuid> {
         self.mixes.iter().find(|m| m.id == id).map(|m| m.uuid)
     }
+    pub fn remove_channel_by_uuid(&mut self, uuid: Uuid) {
+        self.channels.retain(|c| c.uuid != uuid);
+    }
+    pub fn remove_mix_by_uuid(&mut self, uuid: Uuid) {
+        self.mixes.retain(|m| m.uuid != uuid);
+    }
 }
