@@ -1,6 +1,24 @@
 use std::collections::HashSet;
 use tideline_sdk::Capability;
 
+pub const CAP_CONFIG_READ: &str = "config.read";
+pub const CAP_CONFIG_WRITE_NAMESPACE: &str = "config.write.namespace";
+pub const CAP_CHANNEL_READ: &str = "channel.read";
+pub const CAP_CHANNEL_ATTACH_DATA: &str = "channel.attach_data";
+pub const CAP_MIX_ATTACH_DATA: &str = "mix.attach_data";
+pub const CAP_PIPEWIRE_CONTRIBUTE: &str = "pipewire.contribute";
+
+pub fn known_capabilities() -> &'static [&'static str] {
+    &[
+        CAP_CONFIG_READ,
+        CAP_CONFIG_WRITE_NAMESPACE,
+        CAP_CHANNEL_READ,
+        CAP_CHANNEL_ATTACH_DATA,
+        CAP_MIX_ATTACH_DATA,
+        CAP_PIPEWIRE_CONTRIBUTE,
+    ]
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct CapabilitySet {
     set: HashSet<Capability>,
