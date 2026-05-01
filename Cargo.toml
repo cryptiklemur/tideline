@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/tideline-sdk",
     "crates/tideline-host",
+    "crates/tideline-host/tests/fixtures/tideline-test-plugin",
     "src-tauri",
 ]
 

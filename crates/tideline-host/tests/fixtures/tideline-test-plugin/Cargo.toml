@@ -1,0 +1,17 @@
+[package]
+name = "tideline-test-plugin"
+version = "0.0.1"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "tideline-test-plugin"
+path = "src/main.rs"
+
+[dependencies]
+tideline-sdk = { path = "../../../../tideline-sdk" }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }

@@ -1,0 +1,25 @@
+[plugin]
+schema = 1
+id = "io.tideline.test"
+name = "Tideline Test Plugin"
+version = "0.0.1"
+publisher = "Tideline"
+
+[host]
+api = "1.x"
+
+[entry]
+exec = "tideline-test-plugin"
+
+[capabilities]
+required = [
+  "channel.read",
+  "events.publish",
+  "events.subscribe",
+  "log.write",
+  "tray.contribute",
+]
+optional = ["audio.play"]
+
+[contributes]
+publishes_topics = ["io.tideline.test:smoketest_done"]
