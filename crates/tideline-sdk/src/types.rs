@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
 pub enum Capability {
     #[serde(rename = "channel.read")]
     ChannelRead,
@@ -99,5 +98,54 @@ mod tests {
     fn rejects_unknown_capability() {
         let err = serde_json::from_str::<Capability>("\"channel.delete\"");
         assert!(err.is_err());
+    }
+
+    #[test]
+    fn all_variants_round_trip() {
+        let cases: &[(Capability, &str)] = &[
+            (Capability::ChannelRead, "channel.read"),
+            (Capability::ChannelWrite, "channel.write"),
+            (Capability::ChannelSubscribe, "channel.subscribe"),
+            (Capability::ChannelCreate, "channel.create"),
+            (Capability::ChannelAttachData, "channel.attach_data"),
+            (Capability::MixAttachData, "mix.attach_data"),
+            (Capability::ConfigRead, "config.read"),
+            (Capability::ConfigWrite, "config.write"),
+            (Capability::ConfigNamespaceRead, "config.namespace.read"),
+            (Capability::ConfigNamespaceWrite, "config.namespace.write"),
+            (Capability::EventsPublish, "events.publish"),
+            (Capability::EventsSubscribe, "events.subscribe"),
+            (Capability::AudioPlay, "audio.play"),
+            (Capability::AudioMute, "audio.mute"),
+            (Capability::AudioBackendStatus, "audio.backend_status"),
+            (Capability::AudioPosition, "audio.position"),
+            (Capability::LevelsRead, "levels.read"),
+            (Capability::PipewireContribute, "pipewire.contribute"),
+            (Capability::UiSettingsSection, "ui.settings_section"),
+            (Capability::UiStatusPill, "ui.status_pill"),
+            (Capability::UiChannelOverlay, "ui.channel_overlay"),
+            (Capability::UiIframe, "ui.iframe"),
+            (Capability::TrayContribute, "tray.contribute"),
+            (Capability::KeybindRegister, "keybind.register"),
+            (Capability::PortalGlobalShortcuts, "portal.global_shortcuts"),
+            (Capability::HardwareUsb, "hardware.usb"),
+            (Capability::HardwareEvdev, "hardware.evdev"),
+            (Capability::FsRead, "fs.read"),
+            (Capability::FsWrite, "fs.write"),
+            (Capability::NetHttp, "net.http"),
+            (Capability::ProcessSpawn, "process.spawn"),
+            (Capability::SecretsRead, "secrets.read"),
+            (Capability::SecretsWrite, "secrets.write"),
+            (Capability::LogWrite, "log.write"),
+        ];
+
+        assert_eq!(cases.len(), 34, "should cover every variant exactly once");
+
+        for (variant, expected_wire) in cases {
+            let json = serde_json::to_string(variant).unwrap();
+            assert_eq!(json, format!("\"{}\"", expected_wire), "serialize mismatch for {:?}", variant);
+            let back: Capability = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, *variant, "round-trip mismatch for {:?}", variant);
+        }
     }
 }
