@@ -1,9 +1,17 @@
-//! Tideline plugin SDK — shared types, RPC framing, plugin entry helpers.
+//! Tideline Plugin SDK
+//!
+//! Re-exports framing, rpc, types, transport, client, and plugin trait for plugin authors.
 
-pub mod framing;
-pub mod rpc;
 pub mod types;
+pub mod rpc;
+pub mod framing;
+pub mod transport;
+pub mod client;
+pub mod plugin;
+
 pub use types::Capability;
+pub use plugin::{Plugin, run};
+pub use client::HostClient;
 
 #[cfg(test)]
 mod tests {
