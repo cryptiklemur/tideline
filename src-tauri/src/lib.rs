@@ -1,6 +1,7 @@
 #[cfg(target_os = "linux")]
 mod glib_log;
 mod levels;
+mod plugins;
 mod ptt;
 mod routing;
 
@@ -1591,6 +1592,9 @@ pub fn run() {
     };
 
     tauri::Builder::default()
+        .register_uri_scheme_protocol("tideline-plugin", |ctx, req| {
+            plugins::handle_request(ctx, req)
+        })
         .plugin(tauri_plugin_opener::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
@@ -1622,6 +1626,23 @@ pub fn run() {
             app.manage(Arc::new(LevelMonitor::new(app.handle().clone())));
             routing::spawn(app.handle().clone());
             register_all_keybinds(app.handle());
+
+            let plugin_registry = Arc::new(tideline_host::PluginRegistry::new());
+            app.manage(plugin_registry.clone());
+            let iframe_bridge = tideline_host::IframeBridge::new(plugin_registry.clone());
+            app.manage(iframe_bridge);
+            let mut iframe_rx = plugin_registry.subscribe_iframe_messages();
+            let app_handle_for_iframe = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                while let Ok(msg) = iframe_rx.recv().await {
+                    let _ = plugins::forward_to_iframe(
+                        &app_handle_for_iframe,
+                        &msg.plugin_id,
+                        &msg.surface_id,
+                        msg.payload,
+                    );
+                }
+            });
 
             let cfg_snapshot = app.state::<AppState>().config.lock().unwrap().clone();
             let ptt_runtime = crate::ptt::PttRuntime::from_config(&cfg_snapshot);
@@ -1809,6 +1830,7 @@ pub fn run() {
             ptt_wave_xlr_present,
             ptt_install_udev_rule,
             ptt_configure_shortcuts,
+            plugins::tideline_plugin_iframe_send,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

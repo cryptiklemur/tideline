@@ -37,4 +37,6 @@ ashpd = { version = "0.13", default-features = false, features = ["tokio", "glob
 zbus = { version = "5", default-features = false, features = ["tokio"] }
 futures-util = "0.3"
 tokio = { version = "1", features = ["macros", "process", "io-util", "time"] }
+mime_guess = "2"
+dirs = "5"
 

@@ -11,6 +11,7 @@ use tideline_sdk::types::Manifest;
 use crate::capabilities::CapabilitySet;
 use crate::contributions::Contributions;
 use crate::events::EventBus;
+use crate::iframe::IframeMessage;
 use crate::install::{self, InstallError, InstallPreview};
 use crate::logging::PluginLog;
 use crate::manifest;
@@ -45,6 +46,7 @@ pub struct PluginRegistry {
     pub installed: RwLock<HashMap<String, Arc<InstalledPlugin>>>,
     contributions: RwLock<Contributions>,
     contrib_tx: tokio::sync::broadcast::Sender<Contributions>,
+    iframe_tx: tokio::sync::broadcast::Sender<IframeMessage>,
     test_handlers: RwLock<HashMap<String, TestHandler>>,
 }
 
@@ -75,11 +77,13 @@ impl Default for PluginRegistry {
 impl PluginRegistry {
     pub fn new() -> Self {
         let (contrib_tx, _) = tokio::sync::broadcast::channel(16);
+        let (iframe_tx, _) = tokio::sync::broadcast::channel(64);
         Self {
             bus: EventBus::new(),
             installed: RwLock::new(HashMap::new()),
             contributions: RwLock::new(Contributions::default()),
             contrib_tx,
+            iframe_tx,
             test_handlers: RwLock::new(HashMap::new()),
         }
     }
@@ -277,6 +281,16 @@ impl PluginRegistry {
         self.contrib_tx.subscribe()
     }
 
+    pub fn subscribe_iframe_messages(&self) -> tokio::sync::broadcast::Receiver<IframeMessage> {
+        self.iframe_tx.subscribe()
+    }
+
+    /// Publish an iframe message to all subscribers (typically the Tauri layer
+    /// which forwards it to the matching webview via window.postMessage).
+    pub fn publish_iframe_message(&self, msg: IframeMessage) {
+        let _ = self.iframe_tx.send(msg);
+    }
+
     /// Replace the aggregated contributions and notify subscribers.
     /// Wave 3 will populate this from per-plugin contribution streams.
     pub async fn set_contributions(&self, c: Contributions) {
@@ -315,7 +329,8 @@ impl PluginRegistry {
         method: &str,
         params: serde_json::Value,
     ) -> Result<(), RegistryError> {
-        if self.test_handlers.read().await.contains_key(plugin_id) {
+        if let Some(handler) = self.test_handlers.read().await.get(plugin_id).cloned() {
+            let _ = handler(method, &params);
             return Ok(());
         }
         let runtime = self.runtime(plugin_id).await

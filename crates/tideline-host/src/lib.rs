@@ -14,5 +14,7 @@ pub mod registry;
 pub mod rpc;
 pub mod contribute;
 pub mod contributions;
+pub mod iframe;
 
+pub use iframe::{IframeBridge, IframeMessage, PluginIframeIncoming};
 pub use registry::{InstalledPlugin, PluginRegistry, RegistryError};
