@@ -48,7 +48,7 @@ impl HostClient {
         self.transport.call("host/channel.list", Some(json!({})), Duration::from_secs(2)).await
     }
 
-    pub async fn tray_notify(&self, title: &str, body: &str) -> Result<(), SdkTransportError> {
+    pub async fn notify(&self, title: &str, body: &str) -> Result<(), SdkTransportError> {
         self.transport.call(
             "host/notify",
             Some(json!({"title": title, "body": body})),

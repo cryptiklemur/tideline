@@ -12,7 +12,7 @@ impl Plugin for TestPlugin {
         let _ = host.initialize("io.tideline.test", "0.0.1", "1.x").await;
         let _ = host.log_write("info", "test plugin ready").await;
         let _ = host.event_subscribe("host:channel.changed").await;
-        let _ = host.tray_notify("Test Plugin", "ready").await;
+        let _ = host.notify("Test Plugin", "ready").await;
         let _ = host.channel_list().await;
         let _ = host.event_publish(
             "io.tideline.test:smoketest_done",
