@@ -12,5 +12,6 @@ pub mod install;
 pub mod dispatcher;
 pub mod registry;
 pub mod rpc;
+pub mod contribute;
 
 pub use registry::{InstalledPlugin, PluginRegistry, RegistryError};
