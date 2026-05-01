@@ -1,3 +1,4 @@
+pub mod contribute;
 pub mod directive;
 pub mod serialize;
 pub mod topology;
