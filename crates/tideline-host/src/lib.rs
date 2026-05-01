@@ -1,5 +1,7 @@
 //! Tideline plugin host: registry, supervisor, transport, capability gate, event bus.
 
+pub mod paths;
+
 #[cfg(test)]
 mod tests {
     #[test]
