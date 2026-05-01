@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/tideline-core",
     "crates/tideline-sdk",
     "crates/tideline-host",
     "crates/tideline-host/tests/fixtures/tideline-test-plugin",
@@ -25,3 +26,4 @@ async-trait = "0.1"
 tempfile = "3"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 futures-util = "0.3"
+tideline-core = { path = "crates/tideline-core" }
