@@ -9,6 +9,7 @@ pub mod transport;
 pub mod client;
 pub mod plugin;
 pub mod contribute;
+pub mod ui;
 
 pub use types::Capability;
 pub use plugin::{Plugin, run};
