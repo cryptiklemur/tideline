@@ -11,5 +11,6 @@ pub mod supervisor;
 pub mod install;
 pub mod dispatcher;
 pub mod registry;
+pub mod rpc;
 
 pub use registry::{InstalledPlugin, PluginRegistry, RegistryError};
