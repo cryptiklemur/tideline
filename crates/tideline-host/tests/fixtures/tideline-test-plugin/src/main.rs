@@ -83,6 +83,24 @@ impl Plugin for TestPlugin {
                 }
                 Ok(json!({"results": results}))
             }
+            "plugin/call_one" => {
+                let p = params.unwrap_or(json!({}));
+                let method = p.get("method").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let call_params = p.get("params").cloned();
+                match host.call_raw(&method, call_params, Duration::from_secs(2)).await {
+                    Ok(value) => Ok(json!({"ok": true, "value": value})),
+                    Err(tideline_sdk::transport::SdkTransportError::Rpc(rpc_err)) => Ok(json!({
+                        "ok": false,
+                        "code": rpc_err.code,
+                        "message": rpc_err.message,
+                    })),
+                    Err(other) => Ok(json!({
+                        "ok": false,
+                        "code": 0,
+                        "message": other.to_string(),
+                    })),
+                }
+            }
             _ => Err(RpcError {
                 code: error_codes::METHOD_NOT_FOUND,
                 message: format!("unknown method {method}"),
