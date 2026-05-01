@@ -1,0 +1,104 @@
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+/// Plugin-emitted UI tree. Opaque to the host -- Svelte renders it.
+pub type UiNode = Value;
+
+/// Plugin-emitted icon reference. Opaque to the host.
+pub type UiIconRef = Value;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SettingsSectionContribution {
+    pub plugin_id: String,
+    pub surface_id: String,
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<UiIconRef>,
+    #[serde(default)]
+    pub priority: i32,
+    pub tree: UiNode,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StatusPillContribution {
+    pub plugin_id: String,
+    pub surface_id: String,
+    pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tone: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<UiIconRef>,
+    #[serde(default)]
+    pub priority: i32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tooltip: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ChannelFilter {
+    All,
+    ChannelIds { ids: Vec<String> },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OverlayPlacement {
+    Detail,
+    SidebarBadge,
+    HeaderChip,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChannelOverlayContribution {
+    pub plugin_id: String,
+    pub surface_id: String,
+    pub placement: OverlayPlacement,
+    pub channel_filter: ChannelFilter,
+    pub tree: UiNode,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TrayItemContribution {
+    pub plugin_id: String,
+    pub item_id: String,
+    pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accelerator: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<UiIconRef>,
+    #[serde(default)]
+    pub priority: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KeybindActionContribution {
+    pub plugin_id: String,
+    pub action_id: String,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IframeSurface {
+    pub plugin_id: String,
+    pub surface_id: String,
+    pub entry_path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub initial_data: Option<Value>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Contributions {
+    #[serde(default)]
+    pub settings_sections: Vec<SettingsSectionContribution>,
+    #[serde(default)]
+    pub status_pills: Vec<StatusPillContribution>,
+    #[serde(default)]
+    pub channel_overlays: Vec<ChannelOverlayContribution>,
+    #[serde(default)]
+    pub tray_items: Vec<TrayItemContribution>,
+    #[serde(default)]
+    pub keybind_actions: Vec<KeybindActionContribution>,
+    #[serde(default)]
+    pub iframe_surfaces: Vec<IframeSurface>,
+}
