@@ -28,6 +28,20 @@ pub fn sink_node_for_channel(ch: &ChannelCfg) -> String {
         .unwrap_or_else(|| format!("sink.{}", slug(&ch.name)))
 }
 
+/// Two-phase pipeline: build base topology, fold each contribution batch in
+/// order, then serialize. An empty `contributions` slice yields the base
+/// topology unchanged (byte-equivalent to the pre-plugin generator).
+pub fn build_pipewire_conf(
+    cfg: &AppConfig,
+    contributions: &[Vec<directive::PipewireDirective>],
+) -> String {
+    let mut directives = topology::build_base_topology(cfg);
+    for batch in contributions {
+        directives = contribute::apply_contribution(directives, batch);
+    }
+    serialize::serialize_directives(&directives)
+}
+
 pub fn generate_pipewire_config(cfg: &AppConfig) -> Result<String, String> {
     if cfg.mixes.is_empty() {
         return Err("At least one mix is required. Open the Mixes view and add one.".into());
@@ -36,8 +50,7 @@ pub fn generate_pipewire_config(cfg: &AppConfig) -> Result<String, String> {
         return Err("At least one channel is required.".into());
     }
 
-    let directives = topology::build_base_topology(cfg);
-    Ok(serialize::serialize_directives(&directives))
+    Ok(build_pipewire_conf(cfg, &[]))
 }
 
 pub fn generate_app_routing_config(cfg: &AppConfig) -> String {
