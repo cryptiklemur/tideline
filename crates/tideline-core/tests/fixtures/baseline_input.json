@@ -1,0 +1,61 @@
+{
+  "mixes": [
+    {
+      "id": "default",
+      "name": "Default",
+      "sinks": ["alsa_output.real_sink_a", "alsa_output.real_sink_b"]
+    }
+  ],
+  "channels": [
+    {
+      "name": "Game",
+      "kind": "output",
+      "hp_node": "playback.game-hp",
+      "sp_node": "playback.game-sp",
+      "programs": ["chrome", "firefox"],
+      "sources": [],
+      "physical_source": "",
+      "icon": ""
+    },
+    {
+      "name": "Music",
+      "kind": "output",
+      "hp_node": "playback.music-hp",
+      "sp_node": "playback.music-sp",
+      "programs": ["spotify"],
+      "sources": [],
+      "physical_source": "",
+      "icon": ""
+    },
+    {
+      "name": "Mic",
+      "kind": "input",
+      "hp_node": "playback.mic-hp",
+      "sp_node": "playback.mic-sp",
+      "programs": [],
+      "sources": ["alsa_input.real_mic"],
+      "physical_source": "",
+      "icon": ""
+    },
+    {
+      "name": "XLR",
+      "kind": "physical_input",
+      "hp_node": "",
+      "sp_node": "",
+      "programs": [],
+      "sources": [],
+      "physical_source": "alsa_input.real_xlr",
+      "icon": ""
+    }
+  ],
+  "keybinds": {},
+  "ptt": {
+    "mode": "open",
+    "mode_toggle_binding": null,
+    "hold_binding": null,
+    "input_device": "",
+    "tones_enabled": true,
+    "tones_volume": 100,
+    "led_enabled": true
+  }
+}
