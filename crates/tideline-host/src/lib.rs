@@ -5,6 +5,7 @@ pub mod events;
 pub mod logging;
 pub mod manifest;
 pub mod paths;
+pub mod transport;
 
 #[cfg(test)]
 mod tests {
