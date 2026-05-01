@@ -4,6 +4,9 @@ import Icon, { type IconName } from './Icon.svelte';
 import KeybindRow from './KeybindRow.svelte';
 import Modal from './Modal.svelte';
 import SettingsPtt from './SettingsPtt.svelte';
+import PluginSettingsSection from './plugin-ui/PluginSettingsSection.svelte';
+import UiIcon from './plugin-ui/UiIcon.svelte';
+import { pluginUi } from './plugin-ui/pluginUi.svelte';
 import type { AppConfig, AudioBackendStatus, KeybindAction, SinkInfo } from './types';
 
 interface Props {
@@ -18,8 +21,11 @@ interface Props {
 
 let { open = $bindable(), config, outputs, onSetKeybind, onClearKeybind, onConfigUpdate, onClose }: Props = $props();
 
-type SectionId = 'general' | 'appearance' | 'keybinds' | 'ptt' | 'devices';
-const SECTIONS: { id: SectionId; label: string; icon: IconName; hint: string }[] = [
+type BuiltinSectionId = 'general' | 'appearance' | 'keybinds' | 'ptt' | 'devices';
+type ActiveSection =
+    | { kind: BuiltinSectionId }
+    | { kind: 'plugin'; plugin_id: string; surface_id: string };
+const SECTIONS: { id: BuiltinSectionId; label: string; icon: IconName; hint: string }[] = [
     { id: 'general', label: 'General', icon: 'info', hint: 'Overview of your routing setup.' },
     { id: 'appearance', label: 'Appearance', icon: 'palette', hint: 'Theme and visual preferences.' },
     { id: 'keybinds', label: 'Keybinds', icon: 'keyboard', hint: 'Global mute shortcuts.' },
@@ -27,7 +33,7 @@ const SECTIONS: { id: SectionId; label: string; icon: IconName; hint: string }[]
     { id: 'devices', label: 'Devices', icon: 'cable', hint: 'Detected PipeWire sinks.' },
 ];
 
-let active = $state<SectionId>('general');
+let active = $state<ActiveSection>({ kind: 'general' });
 
 type KeybindCategory = 'outputs' | 'channels' | 'mixes';
 let kbCategory = $state<KeybindCategory>('outputs');
@@ -119,22 +125,37 @@ let outputCount = $derived(config.channels.filter(c => (c.kind ?? 'output') === 
     <div class="flex min-h-[460px]">
         <nav class="flex flex-col gap-0.5 w-48 shrink-0 px-2 py-3 border-r border-base-content/10 bg-base-300/40" aria-label="Settings sections">
             {#each SECTIONS as s (s.id)}
-                {@const isActive = active === s.id}
+                {@const isActive = active.kind === s.id}
                 <button
                     type="button"
                     class="flex items-center gap-2.5 px-2.5 py-2 rounded-md text-left transition-colors cursor-pointer
                            {isActive ? 'bg-primary/15 text-primary font-semibold' : 'text-base-content/70 hover:bg-base-content/5 hover:text-base-content'}"
-                    onclick={() => active = s.id}
+                    onclick={() => active = { kind: s.id }}
                     aria-pressed={isActive}
                 >
                     <Icon name={s.icon} size={14} />
                     <span class="text-sm">{s.label}</span>
                 </button>
             {/each}
+            {#each pluginUi.contributions.settings_sections.slice().sort((a, b) => b.priority - a.priority || a.plugin_id.localeCompare(b.plugin_id)) as section (section.plugin_id + ':' + section.surface_id)}
+                {@const isActive = active.kind === 'plugin' && active.plugin_id === section.plugin_id && active.surface_id === section.surface_id}
+                <button
+                    type="button"
+                    class="flex items-center gap-2.5 px-2.5 py-2 rounded-md text-left transition-colors cursor-pointer
+                           {isActive ? 'bg-primary/15 text-primary font-semibold' : 'text-base-content/70 hover:bg-base-content/5 hover:text-base-content'}"
+                    onclick={() => active = { kind: 'plugin', plugin_id: section.plugin_id, surface_id: section.surface_id }}
+                    aria-pressed={isActive}
+                >
+                    {#if section.icon}
+                        <UiIcon node={{ kind: 'icon', id: 'nav-' + section.surface_id, icon: section.icon, size: 14 }} />
+                    {/if}
+                    <span class="text-sm">{section.title}</span>
+                </button>
+            {/each}
         </nav>
 
         <section class="flex-1 min-w-0 px-5 py-4 overflow-y-auto" aria-live="polite">
-            {#if active === 'general'}
+            {#if active.kind === 'general'}
                 <header class="flex flex-col gap-1 mb-4">
                     <h3 class="text-base font-semibold m-0">General</h3>
                     <p class="text-sm text-base-content/55 m-0 leading-snug">Overview of your routing setup. Manage mixes from the sidebar.</p>
@@ -158,7 +179,7 @@ let outputCount = $derived(config.channels.filter(c => (c.kind ?? 'output') === 
                     </div>
                 </div>
                 <p class="text-xs text-base-content/45 m-0 leading-snug mt-4">Each mix routes its assigned output channels to one or more sinks.</p>
-            {:else if active === 'appearance'}
+            {:else if active.kind === 'appearance'}
                 <header class="flex flex-col gap-1 mb-4">
                     <h3 class="text-base font-semibold m-0">Appearance</h3>
                     <p class="text-sm text-base-content/55 m-0 leading-snug">Pick a theme. Automatic follows your system preference.</p>
@@ -180,7 +201,7 @@ let outputCount = $derived(config.channels.filter(c => (c.kind ?? 'output') === 
                         aria-pressed={theme === 'tideline-dark'}
                     >Dark</button>
                 </div>
-            {:else if active === 'keybinds'}
+            {:else if active.kind === 'keybinds'}
                 <header class="flex flex-col gap-1 mb-3">
                     <h3 class="text-base font-semibold m-0">Keybinds</h3>
                     <p class="text-sm text-base-content/55 m-0 leading-snug">Global shortcuts. Press a key combination after clicking Bind. Esc cancels.</p>
@@ -289,9 +310,9 @@ let outputCount = $derived(config.channels.filter(c => (c.kind ?? 'output') === 
                         {/if}
                     {/if}
                 {/if}
-            {:else if active === 'ptt'}
+            {:else if active.kind === 'ptt'}
                 <SettingsPtt {config} {onConfigUpdate} />
-            {:else if active === 'devices'}
+            {:else if active.kind === 'devices'}
                 <header class="flex flex-col gap-1 mb-4">
                     <h3 class="text-base font-semibold m-0">Devices</h3>
                     <p class="text-sm text-base-content/55 m-0 leading-snug">Audio backend status and detected sinks.</p>
@@ -371,6 +392,12 @@ let outputCount = $derived(config.channels.filter(c => (c.kind ?? 'output') === 
                             </li>
                         {/each}
                     </ul>
+                {/if}
+            {:else if active.kind === 'plugin'}
+                {@const pluginActive = active}
+                {@const section = pluginUi.contributions.settings_sections.find((s) => s.plugin_id === pluginActive.plugin_id && s.surface_id === pluginActive.surface_id)}
+                {#if section}
+                    <PluginSettingsSection {section} emit={(e) => pluginUi.emit(pluginActive.plugin_id, e)} />
                 {/if}
             {/if}
         </section>
