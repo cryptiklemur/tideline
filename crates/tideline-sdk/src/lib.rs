@@ -1,5 +1,6 @@
 //! Tideline plugin SDK — shared types, RPC framing, plugin entry helpers.
 
+pub mod rpc;
 pub mod types;
 pub use types::Capability;
 
