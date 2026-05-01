@@ -4346,6 +4346,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tideline-core",
  "tideline-host",
+ "tideline-sdk",
  "tokio",
  "zbus",
 ]

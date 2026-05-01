@@ -1643,6 +1643,7 @@ pub fn run() {
                     );
                 }
             });
+            plugins::spawn_contributions_relay(app.handle(), plugin_registry.clone());
 
             let cfg_snapshot = app.state::<AppState>().config.lock().unwrap().clone();
             let ptt_runtime = crate::ptt::PttRuntime::from_config(&cfg_snapshot);
@@ -1831,6 +1832,9 @@ pub fn run() {
             ptt_install_udev_rule,
             ptt_configure_shortcuts,
             plugins::tideline_plugin_iframe_send,
+            plugins::tideline_plugin_contributions,
+            plugins::tideline_plugin_emit_event,
+            plugins::tideline_plugin_request_permission,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
