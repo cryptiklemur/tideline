@@ -1,8 +1,42 @@
 use std::sync::Arc;
+use std::time::Duration;
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use tideline_sdk::{HostClient, Plugin, run};
 use tideline_sdk::rpc::{RpcError, error_codes};
+
+const HOST_METHODS: &[&str] = &[
+    "host/log.write",
+    "host/channel.list",
+    "host/channel.get",
+    "host/channel.subscribe_meters",
+    "host/channel.create",
+    "host/channel.update",
+    "host/channel.attach_data",
+    "host/mix.attach_data",
+    "host/levels.read",
+    "host/audio.play",
+    "host/source.set_mute",
+    "host/sources.list",
+    "host/audio.position",
+    "host/notify",
+    "host/ui.iframe.show",
+    "host/ui.iframe.hide",
+    "host/ui.channel_overlay.focus",
+    "host/keybind.register",
+    "host/keybind.unregister",
+    "host/pipewire.contribute",
+    "host/config.namespace.get",
+    "host/config.namespace.set",
+    "host/config.read",
+    "host/config.write",
+    "host/fs.read",
+    "host/fs.write",
+    "host/net.http",
+    "host/process.spawn",
+    "host/secrets.read",
+    "host/secrets.write",
+];
 
 struct TestPlugin;
 
@@ -36,6 +70,18 @@ impl Plugin for TestPlugin {
                     }
                 }
                 Ok(json!({"ack": true}))
+            }
+            "plugin/smoke_run" => {
+                let mut results: Vec<Value> = Vec::with_capacity(HOST_METHODS.len());
+                for m in HOST_METHODS {
+                    let res = host.call_raw(m, Some(json!({})), Duration::from_secs(2)).await;
+                    let entry = match res {
+                        Ok(_) => json!({"method": m, "ok": true, "error": Value::Null}),
+                        Err(e) => json!({"method": m, "ok": false, "error": e.to_string()}),
+                    };
+                    results.push(entry);
+                }
+                Ok(json!({"results": results}))
             }
             _ => Err(RpcError {
                 code: error_codes::METHOD_NOT_FOUND,

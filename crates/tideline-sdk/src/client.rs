@@ -55,4 +55,10 @@ impl HostClient {
             Duration::from_secs(2),
         ).await.map(|_| ())
     }
+
+    pub async fn call_raw(&self, method: &str, params: Option<Value>, timeout: Duration)
+        -> Result<Value, SdkTransportError>
+    {
+        self.transport.call(method, params, timeout).await
+    }
 }
