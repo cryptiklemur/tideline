@@ -1,19 +1,15 @@
 //! Tideline plugin host: registry, supervisor, transport, capability gate, event bus.
 
-pub mod capabilities;
-pub mod events;
-pub mod install;
-pub mod logging;
-pub mod manifest;
 pub mod paths;
+pub mod capabilities;
+pub mod manifest;
+pub mod events;
+pub mod logging;
+pub mod transport;
 pub mod runtime;
 pub mod supervisor;
-pub mod transport;
+pub mod install;
+pub mod dispatcher;
+pub mod registry;
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn host_links() {
-        assert_eq!(2 + 2, 4);
-    }
-}
+pub use registry::{InstalledPlugin, PluginRegistry, RegistryError};
