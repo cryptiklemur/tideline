@@ -7,6 +7,7 @@ license.workspace = true
 
 [dependencies]
 tideline-sdk = { path = "../tideline-sdk" }
+tideline-core = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
