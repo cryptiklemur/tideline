@@ -1,7 +1,10 @@
 use crate::model::{AppConfig, ChannelCfg, ChannelKind, Mix, PttConfig};
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::io;
+use std::path::{Path, PathBuf};
+
+const BACKUP_SUFFIX: &str = ".pre-uuid.bak";
 
 pub fn home_dir() -> PathBuf {
     PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| "/root".into()))
@@ -71,12 +74,40 @@ pub fn migrate_config(cfg: &mut AppConfig, raw: &str) {
     cfg.mixes = vec![hp_mix, sp_mix];
 }
 
-pub fn load_config() -> AppConfig {
-    if let Ok(data) = fs::read_to_string(config_path()) {
-        if let Ok(mut cfg) = serde_json::from_str::<AppConfig>(&data) {
-            migrate_config(&mut cfg, &data);
-            return cfg;
+pub fn load_config_from(path: &Path) -> io::Result<AppConfig> {
+    let raw = fs::read_to_string(path)?;
+    let needs_backup = !raw.contains("\"uuid\"");
+    if needs_backup {
+        let backup_path = backup_path_for(path);
+        if !backup_path.exists() {
+            fs::write(&backup_path, &raw)?;
         }
+    }
+    let mut cfg: AppConfig = serde_json::from_str(&raw)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    migrate_config(&mut cfg, &raw);
+    Ok(cfg)
+}
+
+pub fn save_config_to(path: &Path, cfg: &AppConfig) -> io::Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let json = serde_json::to_string_pretty(cfg)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    fs::write(path, json)
+}
+
+fn backup_path_for(path: &Path) -> PathBuf {
+    let mut s = path.as_os_str().to_owned();
+    s.push(BACKUP_SUFFIX);
+    s.into()
+}
+
+pub fn load_config() -> AppConfig {
+    let path = config_path();
+    if let Ok(cfg) = load_config_from(&path) {
+        return cfg;
     }
     let cfg = default_config();
     let _ = save_config_to_disk(&cfg);
@@ -84,10 +115,5 @@ pub fn load_config() -> AppConfig {
 }
 
 pub fn save_config_to_disk(cfg: &AppConfig) -> Result<(), String> {
-    let path = config_path();
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-    let json = serde_json::to_string_pretty(cfg).map_err(|e| e.to_string())?;
-    fs::write(&path, json).map_err(|e| e.to_string())
+    save_config_to(&config_path(), cfg).map_err(|e| e.to_string())
 }
