@@ -7,6 +7,7 @@ pub mod logging;
 pub mod manifest;
 pub mod paths;
 pub mod runtime;
+pub mod supervisor;
 pub mod transport;
 
 #[cfg(test)]
