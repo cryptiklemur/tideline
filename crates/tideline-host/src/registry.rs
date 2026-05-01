@@ -9,6 +9,7 @@ use tokio::sync::{Mutex, RwLock, mpsc};
 use tideline_sdk::Capability;
 use tideline_sdk::types::Manifest;
 use crate::capabilities::CapabilitySet;
+use crate::contributions::Contributions;
 use crate::events::EventBus;
 use crate::install::{self, InstallError, InstallPreview};
 use crate::logging::PluginLog;
@@ -16,6 +17,7 @@ use crate::manifest;
 use crate::paths::{plugin_log_path, plugin_permissions_path, data_home};
 use crate::runtime::PluginRuntime;
 use crate::supervisor::{CrashDecision, CrashTracker};
+use crate::transport::TransportError;
 
 #[derive(Debug, Error)]
 pub enum RegistryError {
@@ -24,7 +26,11 @@ pub enum RegistryError {
     #[error("io: {0}")] Io(#[from] std::io::Error),
     #[error("plugin {0:?} not installed")] NotInstalled(String),
     #[error("plugin {0:?} already running")] AlreadyRunning(String),
+    #[error("transport: {0}")] Transport(String),
+    #[error("plugin error: {0}")] PluginError(String),
 }
+
+type TestHandler = Arc<dyn Fn(&str, &serde_json::Value) -> serde_json::Value + Send + Sync>;
 
 pub struct InstalledPlugin {
     pub manifest: Manifest,
@@ -37,6 +43,9 @@ pub struct InstalledPlugin {
 pub struct PluginRegistry {
     pub bus: EventBus,
     pub installed: RwLock<HashMap<String, Arc<InstalledPlugin>>>,
+    contributions: RwLock<Contributions>,
+    contrib_tx: tokio::sync::broadcast::Sender<Contributions>,
+    test_handlers: RwLock<HashMap<String, TestHandler>>,
 }
 
 fn write_permissions(plugin_id: &str, granted: &[Capability]) -> std::io::Result<()> {
@@ -65,7 +74,14 @@ impl Default for PluginRegistry {
 
 impl PluginRegistry {
     pub fn new() -> Self {
-        Self { bus: EventBus::new(), installed: RwLock::new(HashMap::new()) }
+        let (contrib_tx, _) = tokio::sync::broadcast::channel(16);
+        Self {
+            bus: EventBus::new(),
+            installed: RwLock::new(HashMap::new()),
+            contributions: RwLock::new(Contributions::default()),
+            contrib_tx,
+            test_handlers: RwLock::new(HashMap::new()),
+        }
     }
 
     pub fn inspect(&self, source: &Path) -> Result<InstallPreview, RegistryError> {
@@ -251,6 +267,80 @@ impl PluginRegistry {
         let p = self.installed.read().await.get(plugin_id).cloned()?;
         let g = p.runtime.lock().await;
         g.clone()
+    }
+
+    pub async fn contributions(&self) -> Contributions {
+        self.contributions.read().await.clone()
+    }
+
+    pub fn subscribe_contributions(&self) -> tokio::sync::broadcast::Receiver<Contributions> {
+        self.contrib_tx.subscribe()
+    }
+
+    /// Replace the aggregated contributions and notify subscribers.
+    /// Wave 3 will populate this from per-plugin contribution streams.
+    pub async fn set_contributions(&self, c: Contributions) {
+        *self.contributions.write().await = c.clone();
+        let _ = self.contrib_tx.send(c);
+    }
+
+    pub async fn send_request(
+        &self,
+        plugin_id: &str,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Result<serde_json::Value, RegistryError> {
+        if let Some(handler) = self.test_handlers.read().await.get(plugin_id).cloned() {
+            return Ok(handler(method, &params));
+        }
+        let runtime = self.runtime(plugin_id).await
+            .ok_or_else(|| RegistryError::NotInstalled(plugin_id.into()))?;
+        let transport = runtime.transport().await
+            .ok_or_else(|| RegistryError::NotInstalled(plugin_id.into()))?;
+        match transport
+            .call(method, Some(params), std::time::Duration::from_secs(30))
+            .await
+        {
+            Ok(value) => Ok(value),
+            Err(TransportError::Rpc(err)) => {
+                Err(RegistryError::PluginError(format!("{}: {}", err.code, err.message)))
+            }
+            Err(e) => Err(RegistryError::Transport(e.to_string())),
+        }
+    }
+
+    pub async fn dispatch_event(
+        &self,
+        plugin_id: &str,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Result<(), RegistryError> {
+        if self.test_handlers.read().await.contains_key(plugin_id) {
+            return Ok(());
+        }
+        let runtime = self.runtime(plugin_id).await
+            .ok_or_else(|| RegistryError::NotInstalled(plugin_id.into()))?;
+        let transport = runtime.transport().await
+            .ok_or_else(|| RegistryError::NotInstalled(plugin_id.into()))?;
+        transport
+            .notify(method, Some(params))
+            .await
+            .map_err(|e| RegistryError::Transport(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn new_for_test() -> Arc<Self> {
+        Arc::new(Self::new())
+    }
+
+    pub async fn set_dispatch_for_test<F>(&self, plugin_id: &str, handler: F)
+    where
+        F: Fn(&str, &serde_json::Value) -> serde_json::Value + Send + Sync + 'static,
+    {
+        self.test_handlers
+            .write()
+            .await
+            .insert(plugin_id.to_string(), Arc::new(handler));
     }
 }
 
