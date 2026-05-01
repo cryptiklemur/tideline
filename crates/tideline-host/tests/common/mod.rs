@@ -11,9 +11,9 @@ pub async fn fresh_registry() -> Arc<PluginRegistry> {
     let data = tempfile::tempdir().unwrap();
     let cfg = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
-    let data_path = data.into_path();
-    let cfg_path = cfg.into_path();
-    let state_path = state.into_path();
+    let data_path = data.keep();
+    let cfg_path = cfg.keep();
+    let state_path = state.keep();
     std::env::set_var("XDG_DATA_HOME", &data_path);
     std::env::set_var("XDG_CONFIG_HOME", &cfg_path);
     std::env::set_var("XDG_STATE_HOME", &state_path);
