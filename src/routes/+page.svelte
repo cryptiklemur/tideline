@@ -18,6 +18,7 @@ import StatusPill from '$lib/StatusPill.svelte';
 import Toaster from '$lib/Toaster.svelte';
 import { toaster } from '$lib/toaster.svelte';
 import ChannelOverlay from '$lib/plugin-ui/ChannelOverlay.svelte';
+import PermissionsDialog from '$lib/plugin-ui/PermissionsDialog.svelte';
 import { pluginUi } from '$lib/plugin-ui/pluginUi.svelte';
 import type { AppConfig, AudioBackendStatus, ChannelConfig, ChannelKind, ChannelVolumes, KeybindAction, Mix, SinkInfo } from '$lib/types';
 
@@ -732,5 +733,12 @@ onDestroy(() => pluginUi.teardown());
         onRemoveProgram={(b) => removeProgram(idx, b)}
         onDelete={() => deleteChannel(idx)}
         onClose={() => settingsForIndex = null}
+    />
+{/if}
+
+{#if pluginUi.permissionPrompt}
+    <PermissionsDialog
+        request={pluginUi.permissionPrompt}
+        onResolve={(grant) => pluginUi.respondPermission(grant)}
     />
 {/if}
