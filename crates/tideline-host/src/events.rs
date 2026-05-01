@@ -89,6 +89,10 @@ impl EventBus {
         self.fanout(event).await;
     }
 
+    pub async fn publish_native(&self, topic: &str, params: Value) {
+        self.publish_host(topic, params).await;
+    }
+
     pub async fn publish_plugin(
         &self,
         plugin_id: &str,

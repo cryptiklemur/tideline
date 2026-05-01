@@ -56,6 +56,38 @@ impl HostClient {
         ).await.map(|_| ())
     }
 
+    pub async fn audio_play_b64(&self, audio_b64: &str) -> Result<(), SdkTransportError> {
+        self.transport.call(
+            "host/audio.play",
+            Some(json!({"audio_b64": audio_b64})),
+            Duration::from_secs(5),
+        ).await.map(|_| ())
+    }
+
+    pub async fn config_namespace_get(&self, namespace: &str) -> Result<Value, SdkTransportError> {
+        self.transport.call(
+            "host/config.namespace.get",
+            Some(json!({"namespace": namespace})),
+            Duration::from_secs(2),
+        ).await
+    }
+
+    pub async fn config_namespace_set(&self, namespace: &str, value: Value) -> Result<(), SdkTransportError> {
+        self.transport.call(
+            "host/config.namespace.set",
+            Some(json!({"namespace": namespace, "value": value})),
+            Duration::from_secs(2),
+        ).await.map(|_| ())
+    }
+
+    pub async fn settings_section_render(&self, section_id: &str, tree: Value) -> Result<(), SdkTransportError> {
+        self.transport.call(
+            "plugin/settings.section.render",
+            Some(json!({"section_id": section_id, "tree": tree})),
+            Duration::from_secs(2),
+        ).await.map(|_| ())
+    }
+
     pub async fn call_raw(&self, method: &str, params: Option<Value>, timeout: Duration)
         -> Result<Value, SdkTransportError>
     {
