@@ -8,6 +8,7 @@ pub mod framing;
 pub mod transport;
 pub mod client;
 pub mod plugin;
+pub mod contribute;
 
 pub use types::Capability;
 pub use plugin::{Plugin, run};

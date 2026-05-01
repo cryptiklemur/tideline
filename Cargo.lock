@@ -4379,6 +4379,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 1.0.69",
+ "tideline-core",
  "tokio",
  "toml 0.8.2",
  "tracing",
