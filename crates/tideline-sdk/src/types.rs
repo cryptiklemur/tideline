@@ -82,6 +82,58 @@ pub enum Capability {
     LogWrite,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Manifest {
+    pub plugin: ManifestPluginInfo,
+    pub host: ManifestHost,
+    pub entry: ManifestEntry,
+    #[serde(default)]
+    pub capabilities: ManifestCapabilities,
+    #[serde(default)]
+    pub contributes: ManifestContributes,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ManifestPluginInfo {
+    pub schema: u32,
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub publisher: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ManifestHost {
+    pub api: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ManifestEntry {
+    pub exec: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ManifestCapabilities {
+    #[serde(default)]
+    pub required: Vec<Capability>,
+    #[serde(default)]
+    pub optional: Vec<Capability>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ManifestContributes {
+    #[serde(default)]
+    pub publishes_topics: Vec<String>,
+    #[serde(default)]
+    pub channel_overlays: Vec<ChannelOverlayDecl>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChannelOverlayDecl {
+    pub slot: String,
+    pub icon: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
