@@ -4333,6 +4333,7 @@ dependencies = [
  "tauri-plugin-global-shortcut",
  "tauri-plugin-opener",
  "tideline-core",
+ "tideline-host",
  "tokio",
  "zbus",
 ]

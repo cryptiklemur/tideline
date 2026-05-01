@@ -27,4 +27,5 @@ tempfile = "3"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 futures-util = "0.3"
 tideline-core = { path = "crates/tideline-core" }
+tideline-host = { path = "crates/tideline-host" }
 anyhow = "1"

@@ -45,3 +45,10 @@ fn touched_tag(d: &PipewireDirective) -> Option<RewireableTag> {
         PipewireDirective::LoadModule { .. } => None,
     }
 }
+
+/// Stub: returns no contributions. Wave 2 has zero plugins loaded by default.
+/// Future waves will iterate the plugin registry and dispatch
+/// `plugin/pipewire.contribute_request` to each loaded plugin.
+pub fn collect_pipewire_contributions(_cfg: &tideline_core::model::AppConfig) -> Vec<PluginContribution> {
+    Vec::new()
+}

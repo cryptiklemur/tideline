@@ -87,7 +87,20 @@ pub fn write_app_routing(cfg: &AppConfig) -> Result<(), String> {
 }
 
 pub fn write_pipewire_conf(cfg: &AppConfig) -> Result<Vec<String>, String> {
-    let body = generate_pipewire_config(cfg)?;
+    write_pipewire_conf_with_contributions(cfg, &[])
+}
+
+pub fn write_pipewire_conf_with_contributions(
+    cfg: &AppConfig,
+    contributions: &[Vec<directive::PipewireDirective>],
+) -> Result<Vec<String>, String> {
+    if cfg.mixes.is_empty() {
+        return Err("At least one mix is required. Open the Mixes view and add one.".into());
+    }
+    if cfg.channels.is_empty() {
+        return Err("At least one channel is required.".into());
+    }
+    let body = build_pipewire_conf(cfg, contributions);
 
     let dir = pipewire_conf_dir();
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;

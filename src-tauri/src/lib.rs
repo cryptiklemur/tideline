@@ -558,7 +558,7 @@ fn apply_mix_enabled(enabled: &HashMap<String, bool>, cfg: &AppConfig) {
 
 use tideline_core::pipewire::{
     mix_capture_node, mix_playback_node, sink_node_for_channel, write_app_routing,
-    write_pipewire_conf,
+    write_pipewire_conf_with_contributions,
 };
 
 fn restart_pipewire_stack() {
@@ -568,7 +568,14 @@ fn restart_pipewire_stack() {
 }
 
 fn write_pipewire_and_restart(cfg: &AppConfig) -> Result<String, String> {
-    let backed_up = write_pipewire_conf(cfg)?;
+    let contributions: Vec<Vec<tideline_core::pipewire::directive::PipewireDirective>> =
+        tideline_host::contribute::resolve_collisions(
+            tideline_host::contribute::collect_pipewire_contributions(cfg),
+        )
+        .into_iter()
+        .map(|c| c.directives)
+        .collect();
+    let backed_up = write_pipewire_conf_with_contributions(cfg, &contributions)?;
     restart_pipewire_stack();
 
     let mut msg = String::from("Applied. Audio engine restarted.");
@@ -1149,7 +1156,14 @@ fn save_config(config: AppConfig, app: AppHandle, state: State<'_, AppState>) ->
     let old = state.config.lock().unwrap().clone();
 
     let msg = if let Some(added) = try_soft_apply(&old, &config) {
-        let backed_up = write_pipewire_conf(&config)?;
+        let contributions: Vec<Vec<tideline_core::pipewire::directive::PipewireDirective>> =
+            tideline_host::contribute::resolve_collisions(
+                tideline_host::contribute::collect_pipewire_contributions(&config),
+            )
+            .into_iter()
+            .map(|c| c.directives)
+            .collect();
+        let backed_up = write_pipewire_conf_with_contributions(&config, &contributions)?;
         let mut soft_failed: Option<String> = None;
         for ch in &added {
             if let Err(e) = load_channel_modules(&config, ch) {
