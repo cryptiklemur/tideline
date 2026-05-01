@@ -39,6 +39,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[serial_test::serial]
     fn honors_xdg_overrides() {
         std::env::set_var("XDG_DATA_HOME", "/tmp/wave1-xdg-data");
         std::env::set_var("XDG_CONFIG_HOME", "/tmp/wave1-xdg-config");

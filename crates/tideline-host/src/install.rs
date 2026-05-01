@@ -97,6 +97,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn commit_rejects_undeclared_grant() {
         let preview = inspect(&fixture_root()).unwrap();
         let mut granted = preview.declared_required.clone();
@@ -107,6 +108,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn commit_rejects_missing_required() {
         let preview = inspect(&fixture_root()).unwrap();
         let granted: Vec<Capability> = vec![];
@@ -116,6 +118,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn commit_succeeds_and_copies_manifest() {
         let preview = inspect(&fixture_root()).unwrap();
         let dir = tempfile::tempdir().unwrap();

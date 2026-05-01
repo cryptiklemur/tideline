@@ -22,3 +22,4 @@ futures-util = { workspace = true }
 [dev-dependencies]
 tracing-subscriber = { workspace = true }
 tempfile = { workspace = true }
+serial_test = "3"

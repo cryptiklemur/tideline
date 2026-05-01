@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::future::Future;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Instant;
@@ -46,8 +46,7 @@ fn write_permissions(plugin_id: &str, granted: &[Capability]) -> std::io::Result
         plugin_id: plugin_id.to_string(),
         granted: granted.to_vec(),
     };
-    let raw = toml::to_string(&file)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    let raw = toml::to_string(&file).map_err(std::io::Error::other)?;
     std::fs::write(path, raw)
 }
 
@@ -58,12 +57,18 @@ fn read_permissions(plugin_id: &str) -> Option<Vec<Capability>> {
     Some(file.granted)
 }
 
+impl Default for PluginRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PluginRegistry {
     pub fn new() -> Self {
         Self { bus: EventBus::new(), installed: RwLock::new(HashMap::new()) }
     }
 
-    pub fn inspect(&self, source: &PathBuf) -> Result<InstallPreview, RegistryError> {
+    pub fn inspect(&self, source: &Path) -> Result<InstallPreview, RegistryError> {
         Ok(install::inspect(source)?)
     }
 
@@ -254,6 +259,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[serial_test::serial]
     async fn install_then_discover() {
         let dir = tempfile::tempdir().unwrap();
         let cfg = tempfile::tempdir().unwrap();
