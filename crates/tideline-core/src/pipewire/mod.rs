@@ -1,3 +1,6 @@
+pub mod directive;
+pub mod topology;
+
 use crate::config_io::{pipewire_conf_dir, pulse_conf_dir, slug, wireplumber_conf_dir};
 use crate::model::{AppConfig, ChannelCfg, ChannelKind, Mix};
 use std::fs;
