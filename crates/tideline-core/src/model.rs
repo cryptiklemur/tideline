@@ -138,3 +138,24 @@ pub struct AppConfig {
     #[serde(default)]
     pub ptt: PttConfig,
 }
+
+impl AppConfig {
+    pub fn channel_by_uuid(&self, uuid: Uuid) -> Option<&ChannelCfg> {
+        self.channels.iter().find(|c| c.uuid == uuid)
+    }
+    pub fn channel_by_uuid_mut(&mut self, uuid: Uuid) -> Option<&mut ChannelCfg> {
+        self.channels.iter_mut().find(|c| c.uuid == uuid)
+    }
+    pub fn channel_by_name(&self, name: &str) -> Option<&ChannelCfg> {
+        self.channels.iter().find(|c| c.name == name)
+    }
+    pub fn mix_by_id(&self, id: &str) -> Option<&Mix> {
+        self.mixes.iter().find(|m| m.id == id)
+    }
+    pub fn mix_by_uuid_mut(&mut self, uuid: Uuid) -> Option<&mut Mix> {
+        self.mixes.iter_mut().find(|m| m.uuid == uuid)
+    }
+    pub fn mix_uuid_for_id(&self, id: &str) -> Option<Uuid> {
+        self.mixes.iter().find(|m| m.id == id).map(|m| m.uuid)
+    }
+}
