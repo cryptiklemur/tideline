@@ -9,6 +9,7 @@ use crate::transport::StdioTransport;
 pub trait Plugin: Send + Sync + 'static {
     async fn on_ready(&self, _host: Arc<HostClient>) {}
     async fn on_event(&self, _host: Arc<HostClient>, _topic: String, _params: Value) {}
+    async fn on_notification(&self, _host: Arc<HostClient>, _method: String, _params: Option<Value>) {}
     async fn on_request(&self, _host: Arc<HostClient>, method: String, _params: Option<Value>)
         -> Result<Value, RpcError>
     {
@@ -52,11 +53,16 @@ pub async fn run<P: Plugin>(plugin: P) {
     let h_evt = host.clone();
     let evt_task = tokio::spawn(async move {
         while let Some(Notification { method, params, .. }) = notifications.recv().await {
-            if method == "host/event.fire" {
-                if let Some(obj) = params.as_ref().and_then(|v| v.as_object()) {
-                    let topic = obj.get("topic").and_then(|t| t.as_str()).unwrap_or("").to_string();
-                    let evt_params = obj.get("params").cloned().unwrap_or(Value::Null);
-                    p_evt.on_event(h_evt.clone(), topic, evt_params).await;
+            match method.as_str() {
+                "host/event.fire" => {
+                    if let Some(obj) = params.as_ref().and_then(|v| v.as_object()) {
+                        let topic = obj.get("topic").and_then(|t| t.as_str()).unwrap_or("").to_string();
+                        let evt_params = obj.get("params").cloned().unwrap_or(Value::Null);
+                        p_evt.on_event(h_evt.clone(), topic, evt_params).await;
+                    }
+                }
+                _ => {
+                    p_evt.on_notification(h_evt.clone(), method, params).await;
                 }
             }
         }

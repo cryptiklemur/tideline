@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use tideline_sdk::{HostClient, Plugin, run};
 use tideline_sdk::rpc::{RpcError, error_codes};
+use tokio::sync::Mutex;
 
 const HOST_METHODS: &[&str] = &[
     "host/log.write",
@@ -38,7 +39,10 @@ const HOST_METHODS: &[&str] = &[
     "host/secrets.write",
 ];
 
-struct TestPlugin;
+#[derive(Default)]
+struct TestPlugin {
+    last_perms_change: Arc<Mutex<Option<Value>>>,
+}
 
 #[async_trait]
 impl Plugin for TestPlugin {
@@ -56,6 +60,14 @@ impl Plugin for TestPlugin {
 
     async fn on_event(&self, host: Arc<HostClient>, topic: String, params: Value) {
         let _ = host.log_write("info", &format!("event {topic}: {params}")).await;
+    }
+
+    async fn on_notification(&self, _host: Arc<HostClient>, method: String, params: Option<Value>) {
+        if method == "plugin/permissions.changed" {
+            let value = params.unwrap_or_else(|| json!({}));
+            let mut guard = self.last_perms_change.lock().await;
+            *guard = Some(value);
+        }
     }
 
     async fn on_request(&self, host: Arc<HostClient>, method: String, params: Option<Value>)
@@ -101,6 +113,10 @@ impl Plugin for TestPlugin {
                     })),
                 }
             }
+            "plugin/last_perms_change" => {
+                let guard = self.last_perms_change.lock().await;
+                Ok(guard.clone().unwrap_or(Value::Null))
+            }
             _ => Err(RpcError {
                 code: error_codes::METHOD_NOT_FOUND,
                 message: format!("unknown method {method}"),
@@ -112,5 +128,5 @@ impl Plugin for TestPlugin {
 
 #[tokio::main]
 async fn main() {
-    run(TestPlugin).await;
+    run(TestPlugin::default()).await;
 }
