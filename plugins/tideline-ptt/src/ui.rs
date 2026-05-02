@@ -10,7 +10,7 @@ pub fn settings_section(cfg: &PluginConfig, capture: CaptureMethod, error: Optio
         CaptureMethod::None => "Push-to-talk",
     };
     let mut children = vec![json!({
-        "kind": "Heading",
+        "kind": "heading",
         "text": heading_text,
     })];
 
@@ -27,7 +27,7 @@ pub fn settings_section(cfg: &PluginConfig, capture: CaptureMethod, error: Optio
             CaptureMethod::None => Value::Null,
         };
         children.push(json!({
-            "kind": "Banner",
+            "kind": "banner",
             "tone": "warning",
             "text": err,
             "action": action,
@@ -36,13 +36,13 @@ pub fn settings_section(cfg: &PluginConfig, capture: CaptureMethod, error: Optio
 
     if matches!(capture, CaptureMethod::Evdev) {
         children.push(json!({
-            "kind": "BindingCapture",
+            "kind": "binding_capture",
             "label": "Toggle mode",
             "value": cfg.mode_toggle_binding,
             "action": "tideline-ptt:set_mode_toggle_binding",
         }));
         children.push(json!({
-            "kind": "BindingCapture",
+            "kind": "binding_capture",
             "label": "Hold to transmit",
             "value": cfg.hold_binding,
             "action": "tideline-ptt:set_hold_binding",
@@ -50,7 +50,7 @@ pub fn settings_section(cfg: &PluginConfig, capture: CaptureMethod, error: Optio
     }
 
     children.push(json!({
-        "kind": "Select",
+        "kind": "select",
         "label": "Input device (PulseAudio source)",
         "value": cfg.input_device,
         "options_action": "tideline-ptt:list_sources",
@@ -58,7 +58,7 @@ pub fn settings_section(cfg: &PluginConfig, capture: CaptureMethod, error: Optio
     }));
 
     json!({
-        "kind": "Section",
+        "kind": "section",
         "id": "tideline-ptt",
         "children": children,
     })
@@ -75,7 +75,7 @@ pub fn status_pill(state: PttState, error: Option<&str>) -> Value {
         }
     };
     json!({
-        "kind": "Badge",
+        "kind": "badge",
         "text": text,
         "tone": tone,
         "pulse": state.transmitting() && error.is_none(),
@@ -107,7 +107,7 @@ mod tests {
             .iter()
             .map(|c| c["kind"].as_str().unwrap())
             .collect();
-        assert_eq!(kinds, ["Heading", "Select"]);
+        assert_eq!(kinds, ["heading", "select"]);
     }
 
     #[test]
@@ -121,7 +121,7 @@ mod tests {
             .collect();
         assert_eq!(
             kinds,
-            ["Heading", "BindingCapture", "BindingCapture", "Select"]
+            ["heading", "binding_capture", "binding_capture", "select"]
         );
     }
 
@@ -136,7 +136,7 @@ mod tests {
             .as_array()
             .unwrap()
             .iter()
-            .find(|c| c["kind"] == "Banner");
+            .find(|c| c["kind"] == "banner");
         assert!(banner.is_some());
         let b = banner.unwrap();
         assert_eq!(b["text"], "denied");
@@ -155,7 +155,7 @@ mod tests {
             .as_array()
             .unwrap()
             .iter()
-            .find(|c| c["kind"] == "Banner")
+            .find(|c| c["kind"] == "banner")
             .unwrap();
         assert_eq!(
             banner["action"]["action"],
