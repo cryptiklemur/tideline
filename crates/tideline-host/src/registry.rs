@@ -110,7 +110,10 @@ impl PluginRegistry {
     }
 
     pub async fn discover(&self) -> Result<usize, RegistryError> {
-        let root = data_home().join("plugins");
+        let root = match std::env::var_os("TIDELINE_DEV_PLUGINS_DIR") {
+            Some(p) => std::path::PathBuf::from(p),
+            None => data_home().join("plugins"),
+        };
         if !root.exists() { return Ok(0); }
         let mut count = 0;
         for entry in std::fs::read_dir(&root)? {
@@ -267,6 +270,10 @@ impl PluginRegistry {
         Ok(())
     }
 
+    pub async fn installed_ids(&self) -> Vec<String> {
+        self.installed.read().await.keys().cloned().collect()
+    }
+
     pub async fn runtime(&self, plugin_id: &str) -> Option<Arc<PluginRuntime>> {
         let p = self.installed.read().await.get(plugin_id).cloned()?;
         let g = p.runtime.lock().await;
@@ -379,6 +386,36 @@ mod tests {
         reg.install(&preview, &granted).await.unwrap();
         let count = reg.discover().await.unwrap();
         assert!(count >= 1);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn discover_uses_dev_plugins_dir_env_override() {
+        let dir = tempfile::tempdir().unwrap();
+        let plugin_dir = dir.path().join("io.test");
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        std::fs::write(plugin_dir.join("tideline-plugin.toml"), r#"
+[plugin]
+schema = 1
+id = "io.test"
+name = "Test"
+version = "0.1.0"
+publisher = "Tideline"
+
+[host]
+api = "1.x"
+
+[entry]
+exec = "bin/test"
+
+[capabilities]
+required = []
+"#).unwrap();
+        std::env::set_var("TIDELINE_DEV_PLUGINS_DIR", dir.path());
+        let reg = PluginRegistry::new();
+        let count = reg.discover().await.unwrap();
+        std::env::remove_var("TIDELINE_DEV_PLUGINS_DIR");
+        assert_eq!(count, 1);
     }
 }
 
