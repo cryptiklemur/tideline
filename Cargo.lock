@@ -266,6 +266,8 @@ dependencies = [
  "cexpr",
  "clang-sys",
  "itertools",
+ "log",
+ "prettyplease",
  "proc-macro2",
  "quote",
  "regex",
@@ -460,6 +462,14 @@ checksum = "374b7c592d9c00c1f4972ea58390ac6b18cbb6ab79011f3bdc90a0b82ca06b77"
 dependencies = [
  "serde",
  "toml 0.9.12+spec-1.1.0",
+]
+
+[[package]]
+name = "carla-sys"
+version = "0.1.0"
+dependencies = [
+ "bindgen",
+ "pkg-config",
 ]
 
 [[package]]
@@ -3364,16 +3374,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rosc"
-version = "0.10.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b2e63d9e6b0d090be1485cf159b1e04c3973d2d3e1614963544ea2ff47a4a981"
-dependencies = [
- "byteorder",
- "nom",
-]
-
-[[package]]
 name = "rustc-hash"
 version = "2.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4373,14 +4373,13 @@ name = "tideline-effects"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "rosc",
+ "carla-sys",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror 1.0.69",
  "tideline-sdk",
  "tokio",
- "tokio-util",
  "tracing",
  "uuid",
  "walkdir",

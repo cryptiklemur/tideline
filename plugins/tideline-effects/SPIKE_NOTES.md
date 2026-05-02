@@ -110,8 +110,56 @@ If qtweb turns out to be GUI-coupled or gated on a Qt event loop we don't want t
 ## Spike artifacts kept
 
 - `plugins/tideline-effects/Cargo.toml` — crate scaffolding
-- `plugins/tideline-effects/src/lib.rs`, `src/main.rs`, `src/osc.rs` — minimal OSC client
-- `plugins/tideline-effects/tests/osc_contract_spike.rs` — the (weak-pass) test, marked `#[ignore]`
+- `plugins/tideline-effects/src/lib.rs`, `src/main.rs` — plugin shell
+- `plugins/tideline-effects/src/carla.rs` — safe-ish wrapper around `carla-sys`
+- `plugins/tideline-effects/tests/ffi_spike.rs` — the FFI viability spike, `#[ignore]`-gated
+- `crates/carla-sys/` — bindgen-generated FFI to libcarla_standalone2
 - This file (`SPIKE_NOTES.md`)
 
-The OSC client and crate skeleton are still useful regardless of which option we pick — under Option A the client becomes the parameter-automation surface, under Option B it goes away (replaced by FFI), under Option C it goes away.
+The original OSC client (`src/osc.rs`) and OSC contract test (`tests/osc_contract_spike.rs`) were deleted in Phase 2 — see below.
+
+---
+
+# Phase 2 — FFI viability (chosen path)
+
+**Date:** 2026-05-02
+**Verdict:** **PASS.** Green-light the FFI architecture for the Wave 7 replan.
+
+## Why qtweb (Option A) was abandoned
+
+Phase 1 named qtweb HTTP as the leading option for chain-ops because `carla_backend_qtweb.py` advertised itself as the "out-of-process control client." Closer inspection of carla 2.6.0-alpha1 showed there is no qtweb *server* in this build line — only a stub *client* (`carla_backend_qtweb.py`) that talks to a server which used to live in carla but has been removed. The HTTP endpoints the client calls (`/add_plugin`, `/remove_plugin`, etc.) have no corresponding handler anywhere in the installed carla tree. Pure OSC and qtweb HTTP are both dead in 2.6.
+
+## Why FFI (Option B) was chosen
+
+Carla itself (the python+Qt frontend) drives `libcarla_standalone2.so` via ctypes. We do the same from Rust. The C ABI is stable, every chain-op we need is exposed, and the headers (`/usr/include/carla/CarlaHost.h`, `/usr/include/carla/CarlaBackend.h`) are part of the `carla-git` package so bindgen can generate bindings deterministically.
+
+## What the spike proved
+
+`cargo test -p tideline-effects --test ffi_spike -- --ignored --nocapture` round-trips the seven control-plane operations Wave 7 depends on:
+
+1. `carla_standalone_host_init` -> non-null `CarlaHostHandle`
+2. `carla_get_engine_driver_count` / `carla_get_engine_driver_name` -> `["JACK", "JACK with ALSA-MIDI", "ALSA", "PulseAudio", "SDL"]`
+3. `carla_engine_init("JACK", "tideline-ffi-spike")` -> true (PipeWire's JACK shim accepted)
+4. `carla_add_plugin(BINARY_NATIVE, PLUGIN_LV2, NULL, "spike", "http://lsp-plug.in/plugins/lv2/gate_mono", 0, NULL, 0)` -> true; `carla_get_current_plugin_count` returns 1, so the new plugin id is 0
+5. `carla_set_active(0, false)` then `carla_set_active(0, true)` -> no-op, no crash
+6. `carla_set_parameter_value(0, 0, 0.5f)` -> no crash
+7. `carla_save_plugin_state(0, "/tmp/.../state.xml")` -> true; resulting XML is **6147 bytes**
+8. `carla_load_plugin_state(0, "/tmp/.../state.xml")` -> true (full round-trip)
+9. `carla_switch_plugins(0, 0)` -> false with assertion `pluginIdA != pluginIdB` (expected — only one plugin in the spike)
+10. `carla_remove_plugin(0)` -> true
+11. `carla_engine_close()` -> true
+
+Test exits 0.
+
+## Rough edges discovered
+
+- **No Dummy driver in this carla build.** Available drivers are JACK / JACK-with-ALSA-MIDI / ALSA / PulseAudio / SDL. The spike falls through to the first available (JACK) because PipeWire ships a libjack shim. Production code can stick with JACK.
+- **JACK bookkeeping assertions during init.** carla emits non-fatal `Carla assertion failure: "groupName != nullptr ..."` warnings on stderr while wiring up its patchbay-aware JACK client. They do not affect API behaviour but are noisy. Investigation deferred — likely a carla-2.6-alpha quirk against the PipeWire JACK shim.
+- **lsp-plug.in/plugins/lv2/gate_mono is the canonical test fixture.** Loaded first try, no fallback needed. Calf Filter was not exercised.
+- **`carla_add_plugin` does not return the new plugin id.** The wrapper calls `carla_get_current_plugin_count` after add and returns `count - 1`. Wave 7 production code should use the same pattern.
+- **rpath plumbing for libcarla_standalone2.** Arch installs the library under `/usr/lib/carla/`, which is not on the default loader path. Solved by `links = "carla_standalone2"` in `crates/carla-sys/Cargo.toml`, exporting `cargo:rpaths=...` from `carla-sys/build.rs`, and re-emitting `cargo:rustc-link-arg-bins=-Wl,-rpath,...` + `-tests` from `plugins/tideline-effects/build.rs`.
+- **Bindgen requires C++ mode.** CarlaHost.h includes CarlaBackend.h which uses a C++ namespace for type forward-decls (the `CARLA_API_EXPORT` symbols themselves are `extern "C"`). Build.rs feeds `clang_arg("-x c++") + clang_arg("-std=c++17")` and an allowlist scoped to `carla_*` / `Carla*` / `BinaryType` / `PluginType` / `ENGINE_*` / `PLUGIN_*` / `BINARY_*` to avoid pulling in the C++ stdlib. Generates clean — no manual blocklist needed.
+
+## Recommendation
+
+**Green-light Option B (FFI to libcarla_standalone2) for the Wave 7 replan.** The seven-operation contract works end-to-end against carla-git 2.6.0-alpha1, the bindings build deterministically through pkg-config + bindgen, and the rpath plumbing is solved generically (any future crate that depends on `carla-sys` and produces an executable target follows the same pattern).

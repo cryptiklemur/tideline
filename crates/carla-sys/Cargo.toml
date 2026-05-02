@@ -1,0 +1,14 @@
+[package]
+name = "carla-sys"
+version = "0.1.0"
+edition = "2021"
+publish = false
+links = "carla_standalone2"
+
+[lib]
+name = "carla_sys"
+path = "src/lib.rs"
+
+[build-dependencies]
+bindgen = "0.72"
+pkg-config = "0.3"

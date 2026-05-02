@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/carla-sys",
     "crates/tideline-core",
     "crates/tideline-sdk",
     "crates/tideline-host",
