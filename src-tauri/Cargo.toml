@@ -18,6 +18,11 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
+[features]
+default = ["custom-protocol", "bundled-plugins"]
+custom-protocol = ["tauri/custom-protocol"]
+bundled-plugins = []
+
 [dependencies]
 tideline-core = { workspace = true }
 tideline-sdk = { workspace = true }

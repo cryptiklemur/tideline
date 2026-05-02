@@ -1664,6 +1664,7 @@ pub fn run() {
                 let registry = plugin_registry.clone();
                 tauri::async_runtime::spawn(async move {
                     if std::env::var_os("TIDELINE_DEV_PLUGINS_DIR").is_none() {
+                        let mut found_dev = false;
                         if let Ok(cwd) = std::env::current_dir() {
                             let mut search = cwd.as_path();
                             for _ in 0..4 {
@@ -1680,6 +1681,7 @@ pub fn run() {
                                                 "plugins: dev override set TIDELINE_DEV_PLUGINS_DIR={}",
                                                 candidate.display()
                                             );
+                                            found_dev = true;
                                             break;
                                         }
                                     }
@@ -1688,6 +1690,21 @@ pub fn run() {
                                     Some(p) => search = p,
                                     None => break,
                                 }
+                            }
+                        }
+                        if !found_dev {
+                            let install_root =
+                                tideline_host::paths::data_home().join("plugins");
+                            match crate::plugins::bundled::extract_to(&install_root) {
+                                Ok(n) if n > 0 => eprintln!(
+                                    "plugins: extracted {n} bundled plugin(s) to {}",
+                                    install_root.display()
+                                ),
+                                Ok(_) => eprintln!(
+                                    "plugins: bundled plugins already up-to-date at {}",
+                                    install_root.display()
+                                ),
+                                Err(e) => eprintln!("plugins: extract failed: {e}"),
                             }
                         }
                     }
