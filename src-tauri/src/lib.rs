@@ -1660,6 +1660,38 @@ pub fn run() {
             });
             plugins::spawn_contributions_relay(app.handle(), plugin_registry.clone());
 
+            {
+                let registry = plugin_registry.clone();
+                tauri::async_runtime::spawn(async move {
+                    if std::env::var_os("TIDELINE_DEV_PLUGINS_DIR").is_none() {
+                        if let Ok(repo_root) = std::env::current_dir() {
+                            let candidate = repo_root.join("plugins");
+                            if candidate.is_dir() {
+                                std::env::set_var("TIDELINE_DEV_PLUGINS_DIR", &candidate);
+                                eprintln!(
+                                    "plugins: dev override set TIDELINE_DEV_PLUGINS_DIR={}",
+                                    candidate.display()
+                                );
+                            }
+                        }
+                    }
+                    match registry.discover().await {
+                        Ok(n) => eprintln!("plugins: discovered {n} plugin(s)"),
+                        Err(e) => {
+                            eprintln!("plugins: discover failed: {e}");
+                            return;
+                        }
+                    }
+                    let ids: Vec<String> = registry.installed_ids().await;
+                    for id in ids {
+                        match registry.start(&id).await {
+                            Ok(_rt) => eprintln!("plugins: started {id}"),
+                            Err(e) => eprintln!("plugins: start {id} failed: {e}"),
+                        }
+                    }
+                });
+            }
+
             let mut tray_rx = plugin_registry.subscribe_contributions();
             let app_handle_for_tray = app.handle().clone();
             tauri::async_runtime::spawn(async move {
