@@ -1,3 +1,4 @@
+pub mod backend;
 pub mod bundled;
 pub mod contributions;
 pub mod iframe_bridge;

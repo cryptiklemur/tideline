@@ -1644,6 +1644,14 @@ pub fn run() {
             register_all_keybinds(app.handle());
 
             let plugin_registry = Arc::new(tideline_host::PluginRegistry::new());
+            {
+                let registry = plugin_registry.clone();
+                tauri::async_runtime::spawn(async move {
+                    registry
+                        .set_backend(std::sync::Arc::new(plugins::backend::TauriHostBackend))
+                        .await;
+                });
+            }
             app.manage(plugin_registry.clone());
             let iframe_bridge = tideline_host::IframeBridge::new(plugin_registry.clone());
             app.manage(iframe_bridge);

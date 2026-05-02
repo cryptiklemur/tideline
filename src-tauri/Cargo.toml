@@ -43,4 +43,6 @@ futures-util = "0.3"
 tokio = { version = "1", features = ["macros", "process", "io-util", "time"] }
 mime_guess = "2"
 dirs = "5"
+notify-rust = "4"
+async-trait = { workspace = true }
 
