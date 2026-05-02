@@ -33,8 +33,6 @@ let config = $state<AppConfig>({
         mode_toggle_binding: null,
         hold_binding: null,
         input_device: '',
-        tones_enabled: true,
-        tones_volume: 100,
         led_enabled: true,
     },
 });

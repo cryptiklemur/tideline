@@ -41,6 +41,7 @@ export interface AppConfig {
     channels: ChannelConfig[];
     keybinds: Record<string, KeybindAction>;
     ptt: PttConfig;
+    plugin_data?: Record<string, unknown>;
 }
 
 export interface SinkInfo {
@@ -98,8 +99,6 @@ export interface PttConfig {
     mode_toggle_binding: Binding | null;
     hold_binding: Binding | null;
     input_device: string;
-    tones_enabled: boolean;
-    tones_volume: number;
     led_enabled: boolean;
 }
 

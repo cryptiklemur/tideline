@@ -55,14 +55,6 @@ async function setInputDevice(name: string) {
     await invoke('ptt_set_input_device', { device: name });
     onConfigUpdate({ ...config, ptt: { ...config.ptt, input_device: name } });
 }
-async function setTonesEnabled(enabled: boolean) {
-    await invoke('ptt_set_tones_enabled', { enabled });
-    onConfigUpdate({ ...config, ptt: { ...config.ptt, tones_enabled: enabled } });
-}
-async function setTonesVolume(volume: number) {
-    await invoke('ptt_set_tones_volume', { volume });
-    onConfigUpdate({ ...config, ptt: { ...config.ptt, tones_volume: volume } });
-}
 async function autoDetect() {
     const node = await invoke<string | null>('ptt_detect_wave_xlr');
     if (node) await setInputDevice(node);
@@ -196,22 +188,4 @@ async function configureShortcuts() {
     {#if !waveXlrPresent && config.ptt.input_device.toLowerCase().includes('wave')}
         <p class="text-xs text-warning leading-snug">Wave XLR not currently detected on USB — mute will fail until it's plugged back in.</p>
     {/if}
-</section>
-
-<section class="flex flex-col gap-2">
-    <h4 class="text-[10px] font-bold uppercase tracking-widest text-base-content/55 m-0">PTT tones</h4>
-    <label class="flex items-center gap-3 cursor-pointer w-fit">
-        <input
-            type="checkbox"
-            class="checkbox checkbox-sm checkbox-primary shrink-0"
-            checked={config.ptt.tones_enabled}
-            onchange={(e) => setTonesEnabled((e.currentTarget as HTMLInputElement).checked)}
-        />
-        <span class="text-sm">Play a short cue on press / release</span>
-    </label>
-    <label class="flex items-center gap-2">
-        <span class="text-sm w-20">Volume</span>
-        <input type="range" min="0" max="100" value={config.ptt.tones_volume} class="range range-sm range-primary flex-1" oninput={(e) => setTonesVolume(Number((e.target as HTMLInputElement).value))} />
-        <span class="text-xs tabular-nums w-10 text-right">{config.ptt.tones_volume}%</span>
-    </label>
 </section>
