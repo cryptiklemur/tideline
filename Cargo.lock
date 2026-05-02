@@ -4385,6 +4385,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "tideline-notifications"
+version = "1.0.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "serde",
+ "serde_json",
+ "tideline-sdk",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "tideline-sdk"
 version = "0.1.0"
 dependencies = [

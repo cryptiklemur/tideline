@@ -1,0 +1,30 @@
+[plugin]
+id = "tideline-notifications"
+name = "PTT Notifications"
+version = "1.0.0"
+authors = ["aaron@cryptiklemur"]
+description = "Shows a desktop notification when PTT mode is toggled."
+license = "MIT"
+
+[host]
+api = "^1.0"
+
+[entry]
+exec = "bin/tideline-notifications"
+args = []
+autostart = true
+
+[capabilities]
+required = [
+  "notify",
+  "config.read",
+  "config.write.namespace",
+  "ui.settings_section",
+]
+optional = []
+
+[contributes]
+settings_sections = [
+  { id = "main", label = "PTT Notifications", icon = "bell" },
+]
+published_events = []
