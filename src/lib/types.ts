@@ -40,7 +40,6 @@ export interface AppConfig {
     mixes: Mix[];
     channels: ChannelConfig[];
     keybinds: Record<string, KeybindAction>;
-    ptt: PttConfig;
     plugin_data?: Record<string, unknown>;
 }
 
@@ -91,22 +90,3 @@ export type Modifier = 'ctrl' | 'shift' | 'alt' | 'super';
 export type Binding =
     | { kind: 'keyboard'; mods: Modifier[]; key: string }
     | { kind: 'mouse'; mods: Modifier[]; button: string };
-
-export type Mode = 'open' | 'ptt';
-
-export interface PttConfig {
-    mode: Mode;
-    mode_toggle_binding: Binding | null;
-    hold_binding: Binding | null;
-    input_device: string;
-}
-
-export type CaptureMethod = 'none' | 'portal' | 'evdev';
-
-export interface PttState {
-    mode: Mode;
-    hold_active: boolean;
-    transmitting: boolean; // mode==='open' || hold_active
-    error: string | null;  // e.g., evdev permission failure
-    capture_method: CaptureMethod;
-}

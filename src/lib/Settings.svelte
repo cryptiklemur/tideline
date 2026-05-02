@@ -3,7 +3,6 @@ import { invoke } from '@tauri-apps/api/core';
 import Icon, { type IconName } from './Icon.svelte';
 import KeybindRow from './KeybindRow.svelte';
 import Modal from './Modal.svelte';
-import SettingsPtt from './SettingsPtt.svelte';
 import PluginSettingsSection from './plugin-ui/PluginSettingsSection.svelte';
 import UiIcon from './plugin-ui/UiIcon.svelte';
 import { pluginUi } from './plugin-ui/pluginUi.svelte';
@@ -21,7 +20,7 @@ interface Props {
 
 let { open = $bindable(), config, outputs, onSetKeybind, onClearKeybind, onConfigUpdate, onClose }: Props = $props();
 
-type BuiltinSectionId = 'general' | 'appearance' | 'keybinds' | 'ptt' | 'devices';
+type BuiltinSectionId = 'general' | 'appearance' | 'keybinds' | 'devices';
 type ActiveSection =
     | { kind: BuiltinSectionId }
     | { kind: 'plugin'; plugin_id: string; surface_id: string };
@@ -29,7 +28,6 @@ const SECTIONS: { id: BuiltinSectionId; label: string; icon: IconName; hint: str
     { id: 'general', label: 'General', icon: 'info', hint: 'Overview of your routing setup.' },
     { id: 'appearance', label: 'Appearance', icon: 'palette', hint: 'Theme and visual preferences.' },
     { id: 'keybinds', label: 'Keybinds', icon: 'keyboard', hint: 'Global mute shortcuts.' },
-    { id: 'ptt', label: 'Push-to-Talk', icon: 'volume-mute', hint: 'Mode toggle and hold-to-talk.' },
     { id: 'devices', label: 'Devices', icon: 'cable', hint: 'Detected PipeWire sinks.' },
 ];
 
@@ -310,8 +308,6 @@ let outputCount = $derived(config.channels.filter(c => (c.kind ?? 'output') === 
                         {/if}
                     {/if}
                 {/if}
-            {:else if active.kind === 'ptt'}
-                <SettingsPtt {config} {onConfigUpdate} />
             {:else if active.kind === 'devices'}
                 <header class="flex flex-col gap-1 mb-4">
                     <h3 class="text-base font-semibold m-0">Devices</h3>

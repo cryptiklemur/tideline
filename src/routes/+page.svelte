@@ -14,7 +14,6 @@ import TitleBar from '$lib/TitleBar.svelte';
 import ResizeEdges from '$lib/ResizeEdges.svelte';
 import Icon from '$lib/Icon.svelte';
 import Sidebar from '$lib/Sidebar.svelte';
-import StatusPill from '$lib/StatusPill.svelte';
 import Toaster from '$lib/Toaster.svelte';
 import { toaster } from '$lib/toaster.svelte';
 import ChannelOverlay from '$lib/plugin-ui/ChannelOverlay.svelte';
@@ -28,12 +27,6 @@ let config = $state<AppConfig>({
     mixes: [],
     channels: [],
     keybinds: {},
-    ptt: {
-        mode: 'open',
-        mode_toggle_binding: null,
-        hold_binding: null,
-        input_device: '',
-    },
 });
 let mixEnabled = $state<Record<string, boolean>>({});
 let settingsOpen = $state(false);
@@ -441,9 +434,7 @@ onDestroy(() => pluginUi.teardown());
 
 <div class="flex flex-col h-full bg-base-100">
     <ResizeEdges />
-    <TitleBar>
-        <StatusPill />
-    </TitleBar>
+    <TitleBar />
     {#if !pipewireOk}
         <div class="flex items-center gap-2 px-3 py-1.5 bg-error/15 border-b border-error text-sm text-error flex-shrink-0" role="alert">
             <span class="w-2 h-2 rounded-full bg-error shadow-[0_0_6px_var(--color-error)] flex-shrink-0 animate-pulse" aria-hidden="true"></span>
