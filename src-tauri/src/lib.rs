@@ -1664,14 +1664,30 @@ pub fn run() {
                 let registry = plugin_registry.clone();
                 tauri::async_runtime::spawn(async move {
                     if std::env::var_os("TIDELINE_DEV_PLUGINS_DIR").is_none() {
-                        if let Ok(repo_root) = std::env::current_dir() {
-                            let candidate = repo_root.join("plugins");
-                            if candidate.is_dir() {
-                                std::env::set_var("TIDELINE_DEV_PLUGINS_DIR", &candidate);
-                                eprintln!(
-                                    "plugins: dev override set TIDELINE_DEV_PLUGINS_DIR={}",
-                                    candidate.display()
-                                );
+                        if let Ok(cwd) = std::env::current_dir() {
+                            let mut search = cwd.as_path();
+                            for _ in 0..4 {
+                                let candidate = search.join("plugins");
+                                let manifest = search.join("Cargo.toml");
+                                if candidate.is_dir() && manifest.is_file() {
+                                    if let Ok(toml) = std::fs::read_to_string(&manifest) {
+                                        if toml.contains("[workspace]") {
+                                            std::env::set_var(
+                                                "TIDELINE_DEV_PLUGINS_DIR",
+                                                &candidate,
+                                            );
+                                            eprintln!(
+                                                "plugins: dev override set TIDELINE_DEV_PLUGINS_DIR={}",
+                                                candidate.display()
+                                            );
+                                            break;
+                                        }
+                                    }
+                                }
+                                match search.parent() {
+                                    Some(p) => search = p,
+                                    None => break,
+                                }
                             }
                         }
                     }
