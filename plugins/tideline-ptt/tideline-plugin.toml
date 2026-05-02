@@ -1,0 +1,34 @@
+[plugin]
+schema = 1
+id = "tideline-ptt"
+name = "Push-to-Talk"
+version = "0.1.0"
+publisher = "Tideline"
+
+[host]
+api = "1.x"
+
+[entry]
+exec = "bin/tideline-ptt"
+
+[capabilities]
+required = [
+  "hardware.evdev",
+  "portal.global_shortcuts",
+  "keybind.register",
+  "audio.mute",
+  "tray.contribute",
+  "ui.settings_section",
+  "ui.status_pill",
+  "config.namespace.read",
+  "config.namespace.write",
+  "events.publish",
+]
+optional = []
+
+[contributes]
+publishes_topics = [
+  "tideline-ptt:state_changed",
+  "tideline-ptt:mode_changed",
+  "tideline-ptt:transmit_changed",
+]
