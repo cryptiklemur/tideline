@@ -99,7 +99,6 @@ export interface PttConfig {
     mode_toggle_binding: Binding | null;
     hold_binding: Binding | null;
     input_device: string;
-    led_enabled: boolean;
 }
 
 export type CaptureMethod = 'none' | 'portal' | 'evdev';

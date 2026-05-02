@@ -20,7 +20,6 @@ let pttState = $state<PttState>({
     capture_method: 'none',
 });
 let sources = $state<SourceInfo[]>([]);
-let waveXlrPresent = $state(false);
 let unlisten: UnlistenFn | null = null;
 let installing = $state(false);
 let installResult = $state<string | null>(null);
@@ -29,7 +28,6 @@ let configuring = $state(false);
 onMount(async () => {
     pttState = await invoke<PttState>('ptt_get_state');
     sources = await invoke<SourceInfo[]>('list_hardware_inputs').catch(() => []);
-    waveXlrPresent = await invoke<boolean>('ptt_wave_xlr_present').catch(() => false);
     unlisten = await listen<PttState>('ptt:state', (e) => { pttState = e.payload; });
 });
 
@@ -185,7 +183,4 @@ async function configureShortcuts() {
             Detect Wave XLR
         </button>
     </div>
-    {#if !waveXlrPresent && config.ptt.input_device.toLowerCase().includes('wave')}
-        <p class="text-xs text-warning leading-snug">Wave XLR not currently detected on USB — mute will fail until it's plugged back in.</p>
-    {/if}
 </section>

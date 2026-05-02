@@ -33,7 +33,6 @@ let config = $state<AppConfig>({
         mode_toggle_binding: null,
         hold_binding: null,
         input_device: '',
-        led_enabled: true,
     },
 });
 let mixEnabled = $state<Record<string, boolean>>({});
