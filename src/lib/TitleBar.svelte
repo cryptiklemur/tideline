@@ -6,6 +6,8 @@ import Icon from './Icon.svelte';
 interface Props { children?: Snippet; }
 let { children }: Props = $props();
 
+const appTitle = import.meta.env.DEV ? 'Tideline - Dev' : 'Tideline';
+
 function startDrag(e: MouseEvent) {
     if (e.button !== 0) return;
     invoke('window_drag').catch(err => console.error('window_drag failed:', err));
@@ -27,7 +29,7 @@ function doHide() {
 >
     <div class="flex items-center gap-2">
         <span class="flex items-center justify-center text-primary"><Icon name="wave" size={14} /></span>
-        <span class="text-base font-semibold text-base-content/55 uppercase tracking-wider">Tideline</span>
+        <span class="text-base font-semibold text-base-content/55 uppercase tracking-wider">{appTitle}</span>
     </div>
     <div class="flex items-center gap-2" onmousedown={(e) => e.stopPropagation()}>
         {#if children}
