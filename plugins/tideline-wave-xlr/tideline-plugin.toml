@@ -1,0 +1,26 @@
+[plugin]
+schema = 1
+id = "tideline-wave-xlr"
+name = "Wave XLR"
+version = "0.1.0"
+publisher = "Tideline"
+
+[host]
+api = "1.x"
+
+[entry]
+exec = "bin/tideline-wave-xlr"
+
+[capabilities]
+required = [
+  "hardware.usb",
+  "config.read",
+  "config.namespace.write",
+  "events.subscribe",
+  "ui.settings_section",
+  "channel.attach_data",
+]
+optional = []
+
+[contributes]
+publishes_topics = []
