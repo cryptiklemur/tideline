@@ -23,6 +23,11 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 const TIDELINE_TRAY_ID: &str = "tideline-tray";
 
+#[cfg(debug_assertions)]
+const APP_TITLE: &str = "Tideline - Dev";
+#[cfg(not(debug_assertions))]
+const APP_TITLE: &str = "Tideline";
+
 const MIX_ENABLED_FILE: &str = "/tmp/tideline-mix-enabled.json";
 const VOLUMES_FILE: &str = "/tmp/tideline-volumes.json";
 
@@ -1530,7 +1535,8 @@ fn build_tray_menu(
         let sep = PredefinedMenuItem::separator(app)?;
         menu.append(&sep)?;
     }
-    let open = MenuItem::with_id(app, "open", "Open Tideline", true, None::<&str>)?;
+    let open_label = format!("Open {APP_TITLE}");
+    let open = MenuItem::with_id(app, "open", &open_label, true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
     menu.append(&open)?;
     menu.append(&quit)?;
@@ -1819,8 +1825,13 @@ pub fn run() {
             );
             let menu = build_tray_menu(app.handle(), &cfg, &enabled)?;
 
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.set_title(APP_TITLE);
+            }
+
             TrayIconBuilder::with_id(TIDELINE_TRAY_ID)
                 .icon(app.default_window_icon().unwrap().clone())
+                .tooltip(APP_TITLE)
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| {
