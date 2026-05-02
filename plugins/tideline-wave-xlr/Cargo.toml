@@ -19,3 +19,4 @@ anyhow = "1"
 
 [dev-dependencies]
 tideline-host = { path = "../../crates/tideline-host" }
+tempfile = "3"
