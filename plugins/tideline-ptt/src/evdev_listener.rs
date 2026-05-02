@@ -1,7 +1,12 @@
 use crate::binding::{Binding, Modifier};
-use evdev::{Device, EventType, KeyCode};
+use crate::runtime::PttRuntime;
+use evdev::{Device, EventSummary, EventType, KeyCode};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
+use tokio::runtime::Handle;
 
 const MODIFIER_KEYS: &[(KeyCode, Modifier)] = &[
     (KeyCode::KEY_LEFTCTRL, Modifier::Ctrl),
@@ -64,7 +69,6 @@ pub fn probe_permission() -> Result<(), String> {
     Ok(())
 }
 
-#[allow(dead_code)]
 pub(crate) fn modifier_for_key(k: KeyCode) -> Option<Modifier> {
     MODIFIER_KEYS
         .iter()
@@ -214,32 +218,129 @@ pub(crate) fn key_to_binding(k: KeyCode, mods: &HashSet<Modifier>) -> Option<Bin
     None
 }
 
-// TODO(W6.T8): wire to runtime — re-enable the listener loop once
-// `crate::runtime::PttRuntime` exists. The native version lives at
-// `src-tauri/src/ptt/evdev_listener.rs` and uses:
-//
-//   struct Shared {
-//       runtime: Arc<PttRuntime>,
-//       app: AppHandle,
-//       mods: Mutex<HashSet<Modifier>>,
-//       keys_down: Mutex<HashSet<u16>>,
-//   }
-//
-//   pub fn start(runtime: Arc<PttRuntime>, app: AppHandle) { ... }
-//   fn rescan_loop(shared: Arc<Shared>) { ... }
-//   fn device_loop(path: &Path, shared: Arc<Shared>) { ... }
-//   fn handle_key_event(shared: &Shared, k: KeyCode, value: i32) { ... }
-//
-// In the plugin port:
-//   - drop AppHandle (no Tauri in the plugin process)
-//   - replace `handle_press(&app, &runtime)` etc. with method calls on
-//     `runtime` (e.g. `runtime.hold_press()`, `runtime.hold_release()`,
-//     `runtime.toggle_mode()`)
-//   - replace `set_error(&app, &runtime, ...)` with the runtime's error API
-//   - read current bindings from the plugin's config rather than
-//     `shared.app.state::<AppState>().config.lock().unwrap()`
-//   - use plain `tokio::spawn` / `std::thread::spawn` instead of
-//     `tauri::async_runtime::*`
+struct Shared {
+    runtime: Arc<PttRuntime>,
+    handle: Handle,
+    mods: Mutex<HashSet<Modifier>>,
+    /// Set of physical keys currently held (so we can debounce repeats and
+    /// detect releases of the binding key). Stored as raw evdev codes.
+    keys_down: Mutex<HashSet<u16>>,
+}
+
+pub async fn start(runtime: Arc<PttRuntime>) {
+    if let Err(msg) = probe_permission() {
+        runtime.set_error(Some(msg)).await;
+    }
+    let shared = Arc::new(Shared {
+        runtime,
+        handle: Handle::current(),
+        mods: Mutex::new(HashSet::new()),
+        keys_down: Mutex::new(HashSet::new()),
+    });
+    thread::spawn(move || rescan_loop(shared));
+}
+
+fn rescan_loop(shared: Arc<Shared>) {
+    let mut active: HashSet<PathBuf> = HashSet::new();
+    loop {
+        let devices = enumerate_input_devices();
+        for path in &devices {
+            if active.insert(path.clone()) {
+                let path_owned = path.clone();
+                let shared = shared.clone();
+                thread::spawn(move || device_loop(&path_owned, shared));
+            }
+        }
+        active.retain(|p| p.exists());
+        thread::sleep(Duration::from_secs(5));
+    }
+}
+
+fn device_loop(path: &Path, shared: Arc<Shared>) {
+    let Ok(mut dev) = Device::open(path) else {
+        return;
+    };
+    loop {
+        let events = match dev.fetch_events() {
+            Ok(it) => it,
+            Err(_) => return,
+        };
+        for ev in events {
+            if let EventSummary::Key(_, k, value) = ev.destructure() {
+                handle_key_event(&shared, k, value);
+            }
+        }
+    }
+}
+
+fn handle_key_event(shared: &Shared, k: KeyCode, value: i32) {
+    // value: 0 = release, 1 = press, 2 = autorepeat
+    if value == 2 {
+        return;
+    }
+
+    if let Some(m) = modifier_for_key(k) {
+        let mut mods = shared.mods.lock().unwrap();
+        if value == 1 {
+            mods.insert(m);
+        } else {
+            mods.remove(&m);
+        }
+        return;
+    }
+
+    let raw_code = k.code();
+    if value == 1 {
+        let inserted = shared.keys_down.lock().unwrap().insert(raw_code);
+        if !inserted {
+            return;
+        }
+    } else {
+        shared.keys_down.lock().unwrap().remove(&raw_code);
+    }
+
+    let mods_snapshot = { shared.mods.lock().unwrap().clone() };
+    let Some(observed) = key_to_binding(k, &mods_snapshot) else {
+        return;
+    };
+
+    let runtime = shared.runtime.clone();
+    let captured_value = value;
+    shared.handle.spawn(async move {
+        let cfg = runtime.config.lock().await.clone();
+        let toggle = cfg.mode_toggle_binding.as_ref();
+        let hold = cfg.hold_binding.as_ref();
+
+        if captured_value == 1 {
+            if let Some(t) = toggle {
+                if *t == observed {
+                    runtime.toggle_mode().await;
+                    return;
+                }
+            }
+            if let Some(h) = hold {
+                if *h == observed {
+                    runtime.hold_press().await;
+                }
+            }
+        } else if captured_value == 0 {
+            if let Some(h) = hold {
+                let key_match = match (h, &observed) {
+                    (Binding::Keyboard { key: hk, .. }, Binding::Keyboard { key: ok, .. }) => {
+                        hk == ok
+                    }
+                    (Binding::Mouse { button: hb, .. }, Binding::Mouse { button: ob, .. }) => {
+                        hb == ob
+                    }
+                    _ => false,
+                };
+                if key_match {
+                    runtime.hold_release().await;
+                }
+            }
+        }
+    });
+}
 
 #[cfg(test)]
 mod tests {

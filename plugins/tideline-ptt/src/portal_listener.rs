@@ -28,11 +28,13 @@
 //!   listen for Activated / Deactivated signals → dispatch
 //! ```
 
+use crate::runtime::PttRuntime;
 use futures_util::StreamExt;
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 use zbus::{
-    zvariant::{OwnedObjectPath, OwnedValue},
+    zvariant::{ObjectPath, OwnedObjectPath, OwnedValue, Value},
     Connection, Proxy,
 };
 
@@ -40,120 +42,128 @@ pub const SHORTCUT_TOGGLE: &str = "mode_toggle";
 pub const SHORTCUT_HOLD: &str = "hold";
 
 const PORTAL_BUS: &str = "org.freedesktop.portal.Desktop";
-#[allow(dead_code)]
 const PORTAL_PATH: &str = "/org/freedesktop/portal/desktop";
-#[allow(dead_code)]
 const IFACE_GLOBAL_SHORTCUTS: &str = "org.freedesktop.portal.GlobalShortcuts";
 const IFACE_REQUEST: &str = "org.freedesktop.portal.Request";
 
 /// Stable handle tokens. Unlike ashpd's auto-randomized defaults, these
 /// persist across launches so KDE re-uses the same shortcut entry.
 pub const SESSION_TOKEN: &str = "tideline_ptt";
-#[allow(dead_code)]
 pub const REQ_TOKEN_CREATE: &str = "tideline_ptt_create";
-#[allow(dead_code)]
 pub const REQ_TOKEN_BIND: &str = "tideline_ptt_bind";
 
-// TODO(W6.T8): wire to runtime — re-enable `try_start`, `dispatch_activated`
-// and `dispatch_deactivated` once `crate::runtime::PttRuntime` exists.
-//
-// The native version lives at `src-tauri/src/ptt/portal_listener.rs`. In the
-// plugin port:
-//   - drop the `app: AppHandle` parameter (no Tauri in the plugin process)
-//   - replace `handle_toggle(&app, &runtime)` with `runtime.toggle_mode()`
-//   - replace `handle_press(&app, &runtime)` with `runtime.hold_press()`
-//   - replace `handle_release(&app, &runtime)` with `runtime.hold_release()`
-//   - use plain `tokio::spawn` instead of `tauri::async_runtime::spawn`
-//
-// Skeleton (kept here for ease of restoration in T8):
-//
-//   pub async fn try_start(runtime: Arc<PttRuntime>) -> Result<(), String> {
-//       let conn = Connection::session().await
-//           .map_err(|e| format!("dbus session connect: {}", e))?;
-//       let portal = Proxy::new(&conn, PORTAL_BUS, PORTAL_PATH, IFACE_GLOBAL_SHORTCUTS)
-//           .await
-//           .map_err(|e| format!("portal proxy: {}", e))?;
-//       let unique_id = unique_id(&conn)?;
-//
-//       let mut create_opts: HashMap<&str, Value<'_>> = HashMap::new();
-//       create_opts.insert("handle_token", REQ_TOKEN_CREATE.into());
-//       create_opts.insert("session_handle_token", SESSION_TOKEN.into());
-//       let _create_resp = portal_request(&conn, &portal, "CreateSession",
-//           &(create_opts,), &unique_id, REQ_TOKEN_CREATE)
-//           .await
-//           .map_err(|e| format!("CreateSession: {}", e))?;
-//
-//       let session_path: OwnedObjectPath = ObjectPath::try_from(format!(
-//           "/org/freedesktop/portal/desktop/session/{}/{}",
-//           unique_id, SESSION_TOKEN
-//       ))
-//       .map_err(|e| format!("bad session path: {}", e))?
-//       .into();
-//
-//       let shortcuts: Vec<(&str, HashMap<&str, Value<'_>>)> = vec![
-//           (SHORTCUT_TOGGLE, HashMap::from([
-//               ("description", Value::from("Toggle PTT mode (open mic / push-to-talk)")),
-//           ])),
-//           (SHORTCUT_HOLD, HashMap::from([
-//               ("description", Value::from("Hold to transmit")),
-//           ])),
-//       ];
-//       let parent_window = "";
-//       let mut bind_opts: HashMap<&str, Value<'_>> = HashMap::new();
-//       bind_opts.insert("handle_token", REQ_TOKEN_BIND.into());
-//       let _bind_resp = portal_request(&conn, &portal, "BindShortcuts",
-//           &(&session_path, shortcuts, parent_window, bind_opts),
-//           &unique_id, REQ_TOKEN_BIND)
-//           .await
-//           .map_err(|e| format!("BindShortcuts: {}", e))?;
-//
-//       tokio::spawn(async move {
-//           let _conn = conn.clone();
-//           let mut activated = match portal.receive_signal("Activated").await {
-//               Ok(s) => s,
-//               Err(e) => { eprintln!("portal Activated stream: {}", e); return; }
-//           };
-//           let mut deactivated = match portal.receive_signal("Deactivated").await {
-//               Ok(s) => s,
-//               Err(e) => { eprintln!("portal Deactivated stream: {}", e); return; }
-//           };
-//           loop {
-//               tokio::select! {
-//                   msg = activated.next() => {
-//                       let Some(msg) = msg else { break };
-//                       if let Some(id) = parse_shortcut_id(&msg) {
-//                           dispatch_activated(&id, &runtime);
-//                       }
-//                   }
-//                   msg = deactivated.next() => {
-//                       let Some(msg) = msg else { break };
-//                       if let Some(id) = parse_shortcut_id(&msg) {
-//                           dispatch_deactivated(&id, &runtime);
-//                       }
-//                   }
-//               }
-//           }
-//       });
-//       Ok(())
-//   }
-//
-//   fn dispatch_activated(id: &str, runtime: &Arc<PttRuntime>) {
-//       match id {
-//           SHORTCUT_TOGGLE => runtime.toggle_mode(),
-//           SHORTCUT_HOLD => runtime.hold_press(),
-//           _ => {}
-//       }
-//   }
-//
-//   fn dispatch_deactivated(id: &str, runtime: &Arc<PttRuntime>) {
-//       if id == SHORTCUT_HOLD { runtime.hold_release(); }
-//   }
+/// Attempt to register PTT shortcuts via the XDG GlobalShortcuts portal and
+/// start a background listener. Returns Ok once shortcuts are bound.
+///
+/// On Err the caller should fall back to evdev. Common failure modes:
+///   - portal not running / GlobalShortcuts unavailable
+///   - bind rejected by the compositor
+///   - timeout waiting for Response signal
+pub async fn try_start(runtime: Arc<PttRuntime>) -> Result<(), String> {
+    let conn = Connection::session()
+        .await
+        .map_err(|e| format!("dbus session connect: {}", e))?;
+
+    let portal = Proxy::new(&conn, PORTAL_BUS, PORTAL_PATH, IFACE_GLOBAL_SHORTCUTS)
+        .await
+        .map_err(|e| format!("portal proxy: {}", e))?;
+
+    let unique_id = unique_id(&conn)?;
+
+    let mut create_opts: HashMap<&str, Value<'_>> = HashMap::new();
+    create_opts.insert("handle_token", REQ_TOKEN_CREATE.into());
+    create_opts.insert("session_handle_token", SESSION_TOKEN.into());
+    let _create_resp = portal_request(
+        &conn,
+        &portal,
+        "CreateSession",
+        &(create_opts,),
+        &unique_id,
+        REQ_TOKEN_CREATE,
+    )
+    .await
+    .map_err(|e| format!("CreateSession: {}", e))?;
+
+    let session_path: OwnedObjectPath = ObjectPath::try_from(format!(
+        "/org/freedesktop/portal/desktop/session/{}/{}",
+        unique_id, SESSION_TOKEN
+    ))
+    .map_err(|e| format!("bad session path: {}", e))?
+    .into();
+
+    let shortcuts: Vec<(&str, HashMap<&str, Value<'_>>)> = vec![
+        (
+            SHORTCUT_TOGGLE,
+            HashMap::from([(
+                "description",
+                Value::from("Toggle PTT mode (open mic / push-to-talk)"),
+            )]),
+        ),
+        (
+            SHORTCUT_HOLD,
+            HashMap::from([("description", Value::from("Hold to transmit"))]),
+        ),
+    ];
+    let parent_window = "";
+    let mut bind_opts: HashMap<&str, Value<'_>> = HashMap::new();
+    bind_opts.insert("handle_token", REQ_TOKEN_BIND.into());
+
+    let _bind_resp = portal_request(
+        &conn,
+        &portal,
+        "BindShortcuts",
+        &(&session_path, shortcuts, parent_window, bind_opts),
+        &unique_id,
+        REQ_TOKEN_BIND,
+    )
+    .await
+    .map_err(|e| format!("BindShortcuts: {}", e))?;
+
+    tokio::spawn(async move {
+        let _conn = conn.clone();
+        let mut activated = match portal.receive_signal("Activated").await {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!(?e, "portal Activated stream");
+                return;
+            }
+        };
+        let mut deactivated = match portal.receive_signal("Deactivated").await {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!(?e, "portal Deactivated stream");
+                return;
+            }
+        };
+        loop {
+            tokio::select! {
+                msg = activated.next() => {
+                    let Some(msg) = msg else { break };
+                    if let Some(id) = parse_shortcut_id(&msg) {
+                        match id.as_str() {
+                            SHORTCUT_TOGGLE => runtime.toggle_mode().await,
+                            SHORTCUT_HOLD => runtime.hold_press().await,
+                            _ => {}
+                        }
+                    }
+                }
+                msg = deactivated.next() => {
+                    let Some(msg) = msg else { break };
+                    if let Some(id) = parse_shortcut_id(&msg) {
+                        if id == SHORTCUT_HOLD { runtime.hold_release().await; }
+                    }
+                }
+            }
+        }
+    });
+
+    Ok(())
+}
 
 /// The portal's request/response pattern: caller subscribes to the
 /// Request.Response signal on a predictable path, then invokes the method,
 /// then awaits the signal. We must subscribe BEFORE the call to avoid
 /// missing fast responses.
-#[allow(dead_code)]
 async fn portal_request<B>(
     conn: &Connection,
     portal: &Proxy<'_>,
@@ -201,7 +211,6 @@ where
     Ok(results)
 }
 
-#[allow(dead_code)]
 fn unique_id(conn: &Connection) -> Result<String, String> {
     let unique_name = conn
         .unique_name()
@@ -213,7 +222,6 @@ fn unique_id(conn: &Connection) -> Result<String, String> {
 
 /// Both Activated and Deactivated signals carry `(o, s, t, a{sv})` =
 /// (session_path, shortcut_id, timestamp, options). We only need the id.
-#[allow(dead_code)]
 fn parse_shortcut_id(msg: &zbus::Message) -> Option<String> {
     let body = msg.body();
     let parsed: Result<(OwnedObjectPath, String, u64, HashMap<String, OwnedValue>), _> =

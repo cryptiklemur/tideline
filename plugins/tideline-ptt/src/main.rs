@@ -9,6 +9,8 @@ mod mute;
 #[allow(dead_code)]
 mod portal_listener;
 #[allow(dead_code)]
+mod runtime;
+#[allow(dead_code)]
 mod state;
 
 fn main() {
