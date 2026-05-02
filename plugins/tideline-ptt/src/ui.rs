@@ -64,6 +64,7 @@ pub fn settings_section(cfg: &PluginConfig, capture: CaptureMethod, error: Optio
     })
 }
 
+#[allow(dead_code)]
 pub fn status_pill(state: PttState, error: Option<&str>) -> Value {
     let (text, tone) = if error.is_some() {
         ("PTT error", "warning")

@@ -123,6 +123,7 @@ fn canonical_mods(mods: &[Modifier]) -> Vec<Modifier> {
     out
 }
 
+#[allow(dead_code)]
 fn fmt_mods(mods: &[Modifier]) -> String {
     let mut parts: Vec<&str> = Vec::new();
     for (m, name) in MOD_ORDER {
@@ -167,6 +168,7 @@ impl Binding {
         ))
     }
 
+    #[allow(dead_code)]
     pub fn format(&self) -> String {
         match self {
             Binding::Keyboard { mods, key } => {

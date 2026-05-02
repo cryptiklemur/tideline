@@ -40,6 +40,7 @@ impl PluginConfig {
     }
 }
 
+#[allow(dead_code)]
 pub async fn load(client: &HostClient, namespace: &str) -> Result<PluginConfig, SdkTransportError> {
     let raw = client.config_namespace_get(namespace).await?;
     Ok(PluginConfig::from_value(&raw))

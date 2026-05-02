@@ -81,7 +81,10 @@ impl PttRuntime {
 
         if let Some(mode) = fx.mode_changed {
             let payload = json!({ "mode": mode });
-            if let Err(e) = host.event_publish("tideline-ptt:mode_changed", payload).await {
+            if let Err(e) = host
+                .event_publish("tideline-ptt:mode_changed", payload)
+                .await
+            {
                 tracing::warn!(?e, "event_publish mode_changed failed");
             }
         }
@@ -126,7 +129,10 @@ impl PttRuntime {
             "capture_method": cm,
             "error": err,
         });
-        if let Err(e) = host.event_publish("tideline-ptt:state_changed", payload).await {
+        if let Err(e) = host
+            .event_publish("tideline-ptt:state_changed", payload)
+            .await
+        {
             tracing::warn!(?e, "event_publish state_changed failed");
         }
     }
