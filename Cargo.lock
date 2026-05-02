@@ -4410,12 +4410,16 @@ name = "tideline-wave-xlr"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "hidapi",
  "serde",
  "serde_json",
+ "tempfile",
  "tideline-host",
  "tideline-sdk",
  "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

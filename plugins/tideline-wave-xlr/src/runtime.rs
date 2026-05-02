@@ -56,6 +56,12 @@ impl Runtime {
     pub fn config_snapshot(&self) -> PluginConfig {
         self.config.lock().unwrap().clone()
     }
+
+    /// Replace the current config wholesale. Used at `on_ready` time once the
+    /// host hands back the persisted namespace.
+    pub fn set_config(&self, cfg: PluginConfig) {
+        *self.config.lock().unwrap() = cfg;
+    }
 }
 
 #[cfg(test)]
@@ -168,5 +174,15 @@ mod tests {
         let (r, _w) = make(true, true);
         let updated = r.on_settings_event("led_enabled", serde_json::json!("yes"));
         assert!(updated.is_none());
+    }
+
+    #[test]
+    fn set_config_overwrites_current_config() {
+        let (r, _w) = make(true, true);
+        assert!(r.config_snapshot().led_enabled);
+        r.set_config(PluginConfig { led_enabled: false });
+        assert!(!r.config_snapshot().led_enabled);
+        r.set_config(PluginConfig { led_enabled: true });
+        assert!(r.config_snapshot().led_enabled);
     }
 }
