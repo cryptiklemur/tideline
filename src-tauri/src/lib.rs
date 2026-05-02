@@ -1376,11 +1376,6 @@ fn ptt_detect_wave_xlr() -> Option<String> {
     detect_wave_xlr_capture_node()
 }
 
-#[tauri::command]
-fn ptt_wave_xlr_present() -> bool {
-    crate::ptt::wave_xlr::is_present()
-}
-
 /// Install a udev rule that grants the active local session uaccess to
 /// /dev/input/event*. Triggered from the Settings UI when evdev capture
 /// fails the permission probe. Uses pkexec to authenticate; the user sees
@@ -1944,7 +1939,6 @@ pub fn run() {
             ptt_toggle_mode,
             ptt_get_state,
             ptt_detect_wave_xlr,
-            ptt_wave_xlr_present,
             ptt_install_udev_rule,
             ptt_configure_shortcuts,
             plugins::tideline_plugin_iframe_send,

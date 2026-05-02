@@ -3,7 +3,6 @@ pub mod evdev_listener;
 pub mod mute;
 pub mod portal_listener;
 pub mod state;
-pub mod wave_xlr;
 
 use crate::ptt::state::Tone;
 use crate::{AppConfig, AppState, Mode};
