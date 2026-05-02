@@ -38,6 +38,34 @@ pub const BUNDLED: &[BundledPlugin] = &[
             "/../plugins/tideline-notifications/tideline-plugin.toml"
         )),
     },
+    BundledPlugin {
+        id: "tideline-wave-xlr",
+        exec_name: "tideline-wave-xlr",
+        binary: include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../target/",
+            env!("PROFILE_DIR"),
+            "/tideline-wave-xlr"
+        )),
+        manifest: include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../plugins/tideline-wave-xlr/tideline-plugin.toml"
+        )),
+    },
+    BundledPlugin {
+        id: "tideline-ptt",
+        exec_name: "tideline-ptt",
+        binary: include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../target/",
+            env!("PROFILE_DIR"),
+            "/tideline-ptt"
+        )),
+        manifest: include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../plugins/tideline-ptt/tideline-plugin.toml"
+        )),
+    },
 ];
 
 #[cfg(not(feature = "bundled-plugins"))]

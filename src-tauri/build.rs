@@ -12,7 +12,12 @@ fn main() {
             .to_path_buf();
         let target_dir = workspace_root.join("target").join(&profile);
 
-        for id in ["tideline-tones", "tideline-notifications"] {
+        for id in [
+            "tideline-tones",
+            "tideline-notifications",
+            "tideline-wave-xlr",
+            "tideline-ptt",
+        ] {
             let bin = target_dir.join(id);
             let manifest = workspace_root
                 .join("plugins")
