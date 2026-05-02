@@ -56,8 +56,8 @@ mod tests {
 
     #[test]
     fn toggle_value_reflects_config() {
-        let on = serde_json::to_value(&render(&PluginConfig { led_enabled: true }, true)).unwrap().to_string();
-        let off = serde_json::to_value(&render(&PluginConfig { led_enabled: false }, true)).unwrap().to_string();
+        let on = serde_json::to_value(render(&PluginConfig { led_enabled: true }, true)).unwrap().to_string();
+        let off = serde_json::to_value(render(&PluginConfig { led_enabled: false }, true)).unwrap().to_string();
         assert!(on.contains("\"value\":true"));
         assert!(off.contains("\"value\":false"));
     }
