@@ -1,0 +1,26 @@
+[package]
+name = "tideline-ptt"
+version = "0.1.0"
+edition.workspace = true
+
+[[bin]]
+name = "tideline-ptt"
+path = "src/main.rs"
+
+[dependencies]
+tideline-sdk = { path = "../../crates/tideline-sdk" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+anyhow = "1"
+evdev = "0.13"
+zbus = { version = "5", default-features = false, features = ["tokio"] }
+futures-util = "0.3"
+
+[dev-dependencies]
+tideline-host = { path = "../../crates/tideline-host" }
+tempfile = { workspace = true }

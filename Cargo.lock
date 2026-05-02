@@ -4362,6 +4362,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "tideline-ptt"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "evdev",
+ "futures-util",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tideline-host",
+ "tideline-sdk",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "zbus",
+]
+
+[[package]]
 name = "tideline-sdk"
 version = "0.1.0"
 dependencies = [

@@ -6,6 +6,7 @@ members = [
     "crates/tideline-host",
     "crates/tideline-host/tests/fixtures/tideline-test-plugin",
     "plugins/tideline-notifications",
+    "plugins/tideline-ptt",
     "plugins/tideline-tones",
     "plugins/tideline-wave-xlr",
     "src-tauri",
