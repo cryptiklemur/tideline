@@ -1,4 +1,4 @@
-use crate::model::{AppConfig, ChannelCfg, ChannelKind, Mix, PttConfig};
+use crate::model::{AppConfig, ChannelCfg, ChannelKind, Mix};
 use std::collections::HashMap;
 use std::fs;
 use std::io;
@@ -55,7 +55,6 @@ pub fn default_config() -> AppConfig {
             output_channel("System"),
         ],
         keybinds: HashMap::new(),
-        ptt: PttConfig::default(),
         plugin_data: HashMap::new(),
     }
 }

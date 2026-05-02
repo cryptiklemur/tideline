@@ -2,7 +2,6 @@
 mod glib_log;
 mod levels;
 mod plugins;
-mod ptt;
 mod routing;
 
 use levels::LevelMonitor;
@@ -39,9 +38,7 @@ pub struct SinkInput {
     pub volume: u32,
 }
 
-pub use tideline_core::model::{
-    AppConfig, ChannelCfg, ChannelKind, KeybindAction, Mix, Mode, PttConfig,
-};
+pub use tideline_core::model::{AppConfig, ChannelCfg, ChannelKind, KeybindAction, Mix};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SinkInfo {
@@ -334,23 +331,6 @@ fn fetch_sources() -> Vec<SourceInfo> {
             Some(SourceInfo { name, description })
         })
         .collect()
-}
-
-/// Returns the PipeWire/Pulse capture node name whose product description
-/// contains "Wave XLR", or None if not present.
-fn detect_wave_xlr_capture_node() -> Option<String> {
-    let raw = pactl_output(&["-f", "json", "list", "sources"]);
-    let json: serde_json::Value = serde_json::from_str(&raw).unwrap_or_default();
-    for item in json.as_array().unwrap_or(&vec![]) {
-        let name = item["name"].as_str().unwrap_or("");
-        if name.ends_with(".monitor") || name.is_empty() { continue; }
-        let desc = item["description"].as_str().unwrap_or("");
-        let product = item["properties"]["device.product.name"].as_str().unwrap_or("");
-        if desc.contains("Wave XLR") || product.contains("Wave XLR") {
-            return Some(name.to_string());
-        }
-    }
-    None
 }
 
 fn amixer_output(args: &[&str]) -> String {
@@ -1309,176 +1289,6 @@ fn window_drag(window: tauri::Window) -> Result<(), String> {
     window.start_dragging().map_err(|e| e.to_string())
 }
 
-#[tauri::command]
-fn ptt_set_mode_toggle_binding(
-    binding: Option<crate::ptt::binding::Binding>,
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    {
-        let mut cfg = state.config.lock().unwrap();
-        cfg.ptt.mode_toggle_binding = binding;
-        save_config_to_disk(&cfg)?;
-    }
-    let runtime = app.state::<Arc<crate::ptt::PttRuntime>>().inner().clone();
-    let err = runtime.last_error.lock().unwrap().clone();
-    crate::ptt::set_error(&app, &runtime, err);
-    Ok(())
-}
-
-#[tauri::command]
-fn ptt_set_hold_binding(
-    binding: Option<crate::ptt::binding::Binding>,
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    {
-        let mut cfg = state.config.lock().unwrap();
-        cfg.ptt.hold_binding = binding;
-        save_config_to_disk(&cfg)?;
-    }
-    let runtime = app.state::<Arc<crate::ptt::PttRuntime>>().inner().clone();
-    let err = runtime.last_error.lock().unwrap().clone();
-    crate::ptt::set_error(&app, &runtime, err);
-    Ok(())
-}
-
-#[tauri::command]
-fn ptt_set_input_device(device: String, state: State<'_, AppState>) -> Result<(), String> {
-    let mut cfg = state.config.lock().unwrap();
-    cfg.ptt.input_device = device;
-    save_config_to_disk(&cfg)
-}
-
-#[tauri::command]
-fn ptt_toggle_mode(app: AppHandle) {
-    let runtime = app.state::<Arc<crate::ptt::PttRuntime>>().inner().clone();
-    crate::ptt::handle_toggle(&app, &runtime);
-}
-
-#[tauri::command]
-fn ptt_get_state(app: AppHandle) -> crate::ptt::PttStateEvent {
-    let runtime = app.state::<Arc<crate::ptt::PttRuntime>>().inner().clone();
-    let s = *runtime.state.lock().unwrap();
-    let err = runtime.last_error.lock().unwrap().clone();
-    let method = *runtime.capture_method.lock().unwrap();
-    crate::ptt::PttStateEvent {
-        mode: s.mode,
-        hold_active: s.hold_active,
-        transmitting: s.transmitting(),
-        error: err,
-        capture_method: method,
-    }
-}
-
-#[tauri::command]
-fn ptt_detect_wave_xlr() -> Option<String> {
-    detect_wave_xlr_capture_node()
-}
-
-/// Install a udev rule that grants the active local session uaccess to
-/// /dev/input/event*. Triggered from the Settings UI when evdev capture
-/// fails the permission probe. Uses pkexec to authenticate; the user sees
-/// the system polkit agent's password prompt.
-///
-/// On success, re-probes /dev/input. If the probe now passes, last_error is
-/// cleared. The evdev listener's rescan_loop picks up the newly-accessible
-/// devices on its next iteration (every 5s).
-#[tauri::command]
-async fn ptt_install_udev_rule(app: AppHandle) -> Result<String, String> {
-    // Heredoc terminator is intentionally quoted ('RULE') so the shell
-    // doesn't expand any contents — the rule body is literal.
-    const SCRIPT: &str = r#"set -e
-cat > /etc/udev/rules.d/99-tideline-input.rules <<'RULE'
-# Tideline PTT — grants the active local session access to /dev/input/event*
-# without requiring `input` group membership. Safe to remove if you uninstall
-# Tideline. systemd-logind applies the uaccess ACL on session activation.
-KERNEL=="event*", SUBSYSTEM=="input", TAG+="uaccess"
-RULE
-chmod 0644 /etc/udev/rules.d/99-tideline-input.rules
-udevadm control --reload
-udevadm trigger --subsystem-match=input
-"#;
-
-    let output = tokio::process::Command::new("pkexec")
-        .arg("sh")
-        .arg("-c")
-        .arg(SCRIPT)
-        .output()
-        .await
-        .map_err(|e| format!("pkexec spawn failed: {}", e))?;
-
-    if !output.status.success() {
-        // pkexec exits 126 on auth failure / cancel. Surface stderr so the
-        // user sees what happened.
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let stderr = stderr.trim();
-        let code = output.status.code().unwrap_or(-1);
-        if code == 126 || stderr.contains("dismissed") || stderr.contains("not authorized") {
-            return Err("Authentication cancelled or denied.".to_string());
-        }
-        return Err(format!("pkexec exited {}: {}", code, stderr));
-    }
-
-    let runtime = app.state::<Arc<crate::ptt::PttRuntime>>().inner().clone();
-    if crate::ptt::evdev_listener::probe_permission().is_ok() {
-        crate::ptt::set_error(&app.clone(), &runtime, None);
-        Ok("Installed. PTT input access is now active.".to_string())
-    } else {
-        Ok("Installed. Log out and back in (or replug input devices) for it to take effect.".to_string())
-    }
-}
-
-/// Open the desktop's shortcut configuration UI so the user can assign key
-/// combos to the bound shortcut IDs. Only meaningful when
-/// capture_method == Portal.
-///
-/// Tries the portal's `ConfigureShortcuts` method first (portal v2). If that
-/// fails — most commonly because the active backend is still on v1 — falls
-/// back to opening the desktop's native shortcut settings panel directly.
-#[tauri::command]
-async fn ptt_configure_shortcuts() -> Result<(), String> {
-    use ashpd::desktop::global_shortcuts::GlobalShortcuts;
-    if let Ok(portal) = GlobalShortcuts::new().await {
-        if let Ok(session) = portal.create_session(Default::default()).await {
-            if portal
-                .configure_shortcuts(&session, None, Default::default())
-                .await
-                .is_ok()
-            {
-                return Ok(());
-            }
-        }
-    }
-    // Fallback: open the compositor's shortcut UI directly.
-    let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
-    let cmd: &[&str] = if desktop.to_ascii_lowercase().contains("kde") {
-        &["kcmshell6", "kcm_keys"]
-    } else if desktop.to_ascii_lowercase().contains("gnome") {
-        &["gnome-control-center", "keyboard"]
-    } else {
-        // Last-resort: xdg-open on a settings URI is desktop-dependent;
-        // tell the caller to navigate manually.
-        return Err(
-            "Portal v2 configure_shortcuts unavailable on this desktop. \
-             Open your system's keyboard shortcut settings manually and look for Tideline."
-                .to_string(),
-        );
-    };
-    let status = tokio::process::Command::new(cmd[0])
-        .args(&cmd[1..])
-        .spawn()
-        .map_err(|e| format!("spawn {} failed: {}", cmd[0], e))?
-        .wait()
-        .await
-        .map_err(|e| format!("wait {} failed: {}", cmd[0], e))?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(format!("{} exited {}", cmd[0], status.code().unwrap_or(-1)))
-    }
-}
-
 fn build_tray_menu(
     app: &AppHandle<Wry>,
     cfg: &AppConfig,
@@ -1742,66 +1552,6 @@ pub fn run() {
                 }
             });
 
-            let cfg_snapshot = app.state::<AppState>().config.lock().unwrap().clone();
-            let ptt_runtime = crate::ptt::PttRuntime::from_config(&cfg_snapshot);
-            app.manage(ptt_runtime.clone());
-            // Auto-detect Wave XLR on first run if no input_device is set
-            {
-                let st = app.state::<AppState>();
-                let mut cfg = st.config.lock().unwrap();
-                if cfg.ptt.input_device.is_empty() {
-                    if let Some(node) = detect_wave_xlr_capture_node() {
-                        cfg.ptt.input_device = node;
-                        let _ = save_config_to_disk(&cfg);
-                    }
-                }
-            }
-            // PTT capture: try GlobalShortcuts portal first (Wayland-native, no
-            // /dev/input perms required). Fall back to evdev if the portal is
-            // unavailable or rejects the bind. Done off the setup thread so
-            // window creation never waits on D-Bus IPC — the UI just sees
-            // capture_method=None initially and updates via ptt:state.
-            let runtime_for_init = ptt_runtime.clone();
-            let app_for_init = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                let portal_fut = crate::ptt::portal_listener::try_start(
-                    runtime_for_init.clone(),
-                    app_for_init.clone(),
-                );
-                let portal_result = tokio::time::timeout(
-                    std::time::Duration::from_secs(3),
-                    portal_fut,
-                ).await;
-                match portal_result {
-                    Ok(Ok(())) => {
-                        eprintln!("ptt: capture via xdg GlobalShortcuts portal");
-                        crate::ptt::set_capture_method(
-                            &app_for_init,
-                            &runtime_for_init,
-                            crate::ptt::CaptureMethod::Portal,
-                        );
-                    }
-                    Ok(Err(portal_err)) => {
-                        eprintln!("ptt: portal unavailable ({}), falling back to evdev", portal_err);
-                        crate::ptt::set_capture_method(
-                            &app_for_init,
-                            &runtime_for_init,
-                            crate::ptt::CaptureMethod::Evdev,
-                        );
-                        crate::ptt::evdev_listener::start(runtime_for_init, app_for_init);
-                    }
-                    Err(_) => {
-                        eprintln!("ptt: portal probe timed out, falling back to evdev");
-                        crate::ptt::set_capture_method(
-                            &app_for_init,
-                            &runtime_for_init,
-                            crate::ptt::CaptureMethod::Evdev,
-                        );
-                        crate::ptt::evdev_listener::start(runtime_for_init, app_for_init);
-                    }
-                }
-            });
-
             let cfg = app.state::<AppState>().config.lock().unwrap().clone();
             for ch in &cfg.channels {
                 if ch.kind == ChannelKind::PhysicalInput {
@@ -1941,14 +1691,6 @@ pub fn run() {
             get_all_channel_volumes,
             set_channel_master_volume,
             set_channel_mix_volume,
-            ptt_set_mode_toggle_binding,
-            ptt_set_hold_binding,
-            ptt_set_input_device,
-            ptt_toggle_mode,
-            ptt_get_state,
-            ptt_detect_wave_xlr,
-            ptt_install_udev_rule,
-            ptt_configure_shortcuts,
             plugins::tideline_plugin_iframe_send,
             plugins::tideline_plugin_contributions,
             plugins::tideline_plugin_emit_event,

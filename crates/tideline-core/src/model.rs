@@ -1,4 +1,3 @@
-use crate::binding::Binding;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -88,38 +87,6 @@ pub enum KeybindAction {
     Plugin { plugin_id: String, action_id: String },
 }
 
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum Mode { #[default] Open, Ptt }
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PttConfig {
-    #[serde(default)]
-    pub mode: Mode,
-    #[serde(default)]
-    pub mode_toggle_binding: Option<Binding>,
-    #[serde(default)]
-    pub hold_binding: Option<Binding>,
-    #[serde(default)]
-    pub input_device: String,
-    #[serde(default = "default_led_enabled")]
-    pub led_enabled: bool,
-}
-
-fn default_led_enabled() -> bool { true }
-
-impl Default for PttConfig {
-    fn default() -> Self {
-        Self {
-            mode: Mode::Open,
-            mode_toggle_binding: None,
-            hold_binding: None,
-            input_device: String::new(),
-            led_enabled: true,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AppConfig {
     #[serde(default)]
@@ -128,8 +95,6 @@ pub struct AppConfig {
     pub channels: Vec<ChannelCfg>,
     #[serde(default)]
     pub keybinds: HashMap<String, KeybindAction>,
-    #[serde(default)]
-    pub ptt: PttConfig,
     #[serde(default)]
     pub plugin_data: HashMap<String, Value>,
 }

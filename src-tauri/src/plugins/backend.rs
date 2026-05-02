@@ -4,15 +4,30 @@
 //! desktop toasts.
 
 use async_trait::async_trait;
+use std::process::Command;
 use tideline_host::backend::HostBackend;
 
 pub struct TauriHostBackend;
+
+fn pactl_set_source_mute(node: &str, muted: bool) -> Result<(), String> {
+    if node.is_empty() {
+        return Err("source node not configured".into());
+    }
+    let out = Command::new("pactl")
+        .args(["set-source-mute", node, if muted { "1" } else { "0" }])
+        .output()
+        .map_err(|e| format!("pactl exec failed: {}", e))?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    Ok(())
+}
 
 #[async_trait]
 impl HostBackend for TauriHostBackend {
     async fn set_source_mute(&self, node: &str, muted: bool) -> Result<(), String> {
         let node = node.to_string();
-        tokio::task::spawn_blocking(move || crate::ptt::mute::set_source_mute(&node, muted))
+        tokio::task::spawn_blocking(move || pactl_set_source_mute(&node, muted))
             .await
             .map_err(|e| format!("mute task join failed: {e}"))?
     }
