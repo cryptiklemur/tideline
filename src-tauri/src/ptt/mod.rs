@@ -48,6 +48,12 @@ pub(crate) fn publish_ptt_events<F: Fn(&str, serde_json::Value)>(
             serde_json::json!({ "mode": mode_str(mode) }),
         );
     }
+    if fx.set_led.is_some() {
+        publish(
+            "tideline-ptt:transmit_changed",
+            serde_json::json!({ "transmitting": state.transmitting() }),
+        );
+    }
 }
 
 /// Which capture path is providing PTT shortcuts. Determines what UI surface
@@ -127,13 +133,6 @@ pub fn apply_effects(app: &AppHandle, runtime: &PttRuntime, fx: &Effects) {
     if let Some(muted) = fx.set_muted {
         if let Err(e) = mute::set_source_mute(&cfg_snapshot.ptt.input_device, muted) {
             *runtime.last_error.lock().unwrap() = Some(format!("mute failed: {}", e));
-        }
-    }
-    if let Some(led) = fx.set_led {
-        if cfg_snapshot.ptt.led_enabled {
-            if let Err(e) = wave_xlr::set_led(led) {
-                eprintln!("ptt LED set failed: {}", e); // non-fatal
-            }
         }
     }
     if let Some(mode) = fx.persist_mode {
@@ -226,12 +225,12 @@ mod publish_tests {
         };
         publish_ptt_events(&bus_pub(&bus), &s, &fx);
         let events = bus.drain();
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].0, "tideline-ptt:state_changed");
-        assert_eq!(events[0].1["mode"], "ptt");
-        assert_eq!(events[0].1["hold_active"], true);
-        assert_eq!(events[0].1["transmitting"], true);
-        assert_eq!(events[0].1["play_tone"], "up");
+        assert_eq!(events.len(), 2);
+        let state_evt = events.iter().find(|(t, _)| t == "tideline-ptt:state_changed").unwrap();
+        assert_eq!(state_evt.1["mode"], "ptt");
+        assert_eq!(state_evt.1["hold_active"], true);
+        assert_eq!(state_evt.1["transmitting"], true);
+        assert_eq!(state_evt.1["play_tone"], "up");
     }
 
     #[test]
@@ -247,8 +246,9 @@ mod publish_tests {
         };
         publish_ptt_events(&bus_pub(&bus), &s, &fx);
         let events = bus.drain();
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].1["play_tone"], "down");
+        assert_eq!(events.len(), 2);
+        let state_evt = events.iter().find(|(t, _)| t == "tideline-ptt:state_changed").unwrap();
+        assert_eq!(state_evt.1["play_tone"], "down");
     }
 
     #[test]
@@ -264,10 +264,11 @@ mod publish_tests {
         };
         publish_ptt_events(&bus_pub(&bus), &s, &fx);
         let events = bus.drain();
-        assert_eq!(events.len(), 2);
+        assert_eq!(events.len(), 3);
         let topics: Vec<&str> = events.iter().map(|(t, _)| t.as_str()).collect();
         assert!(topics.contains(&"tideline-ptt:state_changed"));
         assert!(topics.contains(&"tideline-ptt:mode_changed"));
+        assert!(topics.contains(&"tideline-ptt:transmit_changed"));
         let mode_evt = events.iter().find(|(t, _)| t == "tideline-ptt:mode_changed").unwrap();
         assert_eq!(mode_evt.1["mode"], "ptt");
         let state_evt = events.iter().find(|(t, _)| t == "tideline-ptt:state_changed").unwrap();
@@ -290,5 +291,41 @@ mod publish_tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].0, "tideline-ptt:state_changed");
         assert_eq!(events[0].1["play_tone"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn led_change_publishes_transmit_changed() {
+        let bus = CapturedBus::default();
+        let s = make_state(Mode::Ptt, true);
+        let fx = Effects {
+            set_muted: Some(false),
+            play_tone: Some(Tone::Up),
+            set_led: Some(LedColor::Blue),
+            notify_mode: None,
+            persist_mode: None,
+        };
+        publish_ptt_events(&bus_pub(&bus), &s, &fx);
+        let events = bus.drain();
+        let transmit_evt = events
+            .iter()
+            .find(|(t, _)| t == "tideline-ptt:transmit_changed")
+            .expect("transmit_changed should be published when set_led is Some");
+        assert_eq!(transmit_evt.1["transmitting"], true);
+    }
+
+    #[test]
+    fn no_led_change_omits_transmit_changed() {
+        let bus = CapturedBus::default();
+        let s = make_state(Mode::Open, false);
+        let fx = Effects {
+            set_muted: None,
+            play_tone: None,
+            set_led: None,
+            notify_mode: None,
+            persist_mode: None,
+        };
+        publish_ptt_events(&bus_pub(&bus), &s, &fx);
+        let events = bus.drain();
+        assert!(!events.iter().any(|(t, _)| t == "tideline-ptt:transmit_changed"));
     }
 }

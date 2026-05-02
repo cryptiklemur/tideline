@@ -41,6 +41,7 @@ pub fn is_present() -> bool {
     false
 }
 
+#[allow(dead_code)] // Removed in W5.T11; kept for one task to avoid module-decl churn.
 pub fn set_led(_color: LedColor) -> Result<(), String> {
     // Intentional no-op — see file-level comment.
     Ok(())
