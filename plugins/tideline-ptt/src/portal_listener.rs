@@ -31,7 +31,10 @@
 use futures_util::StreamExt;
 use std::collections::HashMap;
 use std::time::Duration;
-use zbus::{Connection, Proxy, zvariant::{OwnedObjectPath, OwnedValue}};
+use zbus::{
+    zvariant::{OwnedObjectPath, OwnedValue},
+    Connection, Proxy,
+};
 
 pub const SHORTCUT_TOGGLE: &str = "mode_toggle";
 pub const SHORTCUT_HOLD: &str = "hold";

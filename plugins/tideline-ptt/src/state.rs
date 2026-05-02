@@ -16,7 +16,10 @@ pub struct PttState {
 
 impl Default for PttState {
     fn default() -> Self {
-        Self { mode: Mode::Open, hold_active: false }
+        Self {
+            mode: Mode::Open,
+            hold_active: false,
+        }
     }
 }
 
@@ -50,7 +53,11 @@ pub fn toggle_mode(state: &mut PttState) -> Effects {
     Effects {
         set_muted: Some(!new_transmitting),
         mode_changed: Some(new_mode),
-        transmit_changed: if old_transmitting != new_transmitting { Some(new_transmitting) } else { None },
+        transmit_changed: if old_transmitting != new_transmitting {
+            Some(new_transmitting)
+        } else {
+            None
+        },
         notify_mode: Some(new_mode),
         persist_mode: Some(new_mode),
     }
@@ -86,7 +93,10 @@ mod tests {
 
     #[test]
     fn open_to_ptt_mutes() {
-        let mut s = PttState { mode: Mode::Open, hold_active: false };
+        let mut s = PttState {
+            mode: Mode::Open,
+            hold_active: false,
+        };
         let e = toggle_mode(&mut s);
         assert_eq!(s.mode, Mode::Ptt);
         assert!(!s.hold_active);
@@ -97,7 +107,10 @@ mod tests {
 
     #[test]
     fn ptt_to_open_unmutes() {
-        let mut s = PttState { mode: Mode::Ptt, hold_active: false };
+        let mut s = PttState {
+            mode: Mode::Ptt,
+            hold_active: false,
+        };
         let e = toggle_mode(&mut s);
         assert_eq!(s.mode, Mode::Open);
         assert_eq!(e.set_muted, Some(false));
@@ -107,7 +120,10 @@ mod tests {
 
     #[test]
     fn hold_noop_in_open() {
-        let mut s = PttState { mode: Mode::Open, hold_active: false };
+        let mut s = PttState {
+            mode: Mode::Open,
+            hold_active: false,
+        };
         let e_press = hold_press(&mut s);
         let e_release = hold_release(&mut s);
         assert_eq!(e_press, Effects::default());
@@ -117,7 +133,10 @@ mod tests {
 
     #[test]
     fn hold_press_in_ptt_unmutes() {
-        let mut s = PttState { mode: Mode::Ptt, hold_active: false };
+        let mut s = PttState {
+            mode: Mode::Ptt,
+            hold_active: false,
+        };
         let e = hold_press(&mut s);
         assert!(s.hold_active);
         assert_eq!(e.set_muted, Some(false));
@@ -126,7 +145,10 @@ mod tests {
 
     #[test]
     fn hold_release_in_ptt_mutes() {
-        let mut s = PttState { mode: Mode::Ptt, hold_active: true };
+        let mut s = PttState {
+            mode: Mode::Ptt,
+            hold_active: true,
+        };
         let e = hold_release(&mut s);
         assert!(!s.hold_active);
         assert_eq!(e.set_muted, Some(true));
@@ -135,7 +157,10 @@ mod tests {
 
     #[test]
     fn double_press_idempotent() {
-        let mut s = PttState { mode: Mode::Ptt, hold_active: false };
+        let mut s = PttState {
+            mode: Mode::Ptt,
+            hold_active: false,
+        };
         let _ = hold_press(&mut s);
         let e = hold_press(&mut s);
         assert_eq!(e, Effects::default());
@@ -144,7 +169,10 @@ mod tests {
 
     #[test]
     fn double_release_idempotent() {
-        let mut s = PttState { mode: Mode::Ptt, hold_active: false };
+        let mut s = PttState {
+            mode: Mode::Ptt,
+            hold_active: false,
+        };
         let e = hold_release(&mut s);
         assert_eq!(e, Effects::default());
         assert!(!s.hold_active);
@@ -152,7 +180,10 @@ mod tests {
 
     #[test]
     fn toggle_to_ptt_resets_hold() {
-        let mut s = PttState { mode: Mode::Open, hold_active: true };
+        let mut s = PttState {
+            mode: Mode::Open,
+            hold_active: true,
+        };
         let e = toggle_mode(&mut s);
         assert_eq!(s.mode, Mode::Ptt);
         assert!(!s.hold_active);
@@ -161,14 +192,23 @@ mod tests {
 
     #[test]
     fn transmitting_open_always_true() {
-        let s = PttState { mode: Mode::Open, hold_active: false };
+        let s = PttState {
+            mode: Mode::Open,
+            hold_active: false,
+        };
         assert!(s.transmitting());
     }
 
     #[test]
     fn transmitting_ptt_follows_hold() {
-        let s_off = PttState { mode: Mode::Ptt, hold_active: false };
-        let s_on = PttState { mode: Mode::Ptt, hold_active: true };
+        let s_off = PttState {
+            mode: Mode::Ptt,
+            hold_active: false,
+        };
+        let s_on = PttState {
+            mode: Mode::Ptt,
+            hold_active: true,
+        };
         assert!(!s_off.transmitting());
         assert!(s_on.transmitting());
     }
