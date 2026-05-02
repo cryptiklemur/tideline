@@ -5,7 +5,7 @@ use serde::Serialize;
 use serde_json::json;
 use std::sync::Arc;
 use tideline_sdk::HostClient;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, OnceCell};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -17,7 +17,7 @@ pub enum CaptureMethod {
 }
 
 pub struct PttRuntime {
-    pub client: Arc<HostClient>,
+    pub client: OnceCell<Arc<HostClient>>,
     pub namespace: &'static str,
     pub state: Mutex<PttState>,
     pub config: Mutex<PluginConfig>,
@@ -26,23 +26,27 @@ pub struct PttRuntime {
 }
 
 impl PttRuntime {
-    pub fn new(
-        client: Arc<HostClient>,
-        namespace: &'static str,
-        config: PluginConfig,
-    ) -> Arc<Self> {
+    pub fn new_without_client(namespace: &'static str, config: PluginConfig) -> Arc<Self> {
         let state = PttState {
             mode: config.mode,
             hold_active: false,
         };
         Arc::new(Self {
-            client,
+            client: OnceCell::new(),
             namespace,
             state: Mutex::new(state),
             config: Mutex::new(config),
             capture_method: Mutex::new(CaptureMethod::None),
             error: Mutex::new(None),
         })
+    }
+
+    pub fn set_host(&self, host: Arc<HostClient>) {
+        let _ = self.client.set(host);
+    }
+
+    fn host(&self) -> Option<&Arc<HostClient>> {
+        self.client.get()
     }
 
     pub async fn toggle_mode(self: &Arc<Self>) {
@@ -61,11 +65,15 @@ impl PttRuntime {
     }
 
     async fn apply_effects(&self, fx: Effects) {
+        let Some(host) = self.host() else {
+            tracing::warn!("apply_effects called before host set");
+            return;
+        };
         let cfg = self.config.lock().await.clone();
 
         if let Some(muted) = fx.set_muted {
             if let Some(node) = cfg.input_device.as_deref() {
-                if let Err(e) = mute::set_source_mute(&self.client, node, muted).await {
+                if let Err(e) = mute::set_source_mute(host, node, muted).await {
                     tracing::warn!(?e, "set_source_mute failed");
                 }
             }
@@ -73,11 +81,7 @@ impl PttRuntime {
 
         if let Some(mode) = fx.mode_changed {
             let payload = json!({ "mode": mode });
-            if let Err(e) = self
-                .client
-                .event_publish("tideline-ptt:mode_changed", payload)
-                .await
-            {
+            if let Err(e) = host.event_publish("tideline-ptt:mode_changed", payload).await {
                 tracing::warn!(?e, "event_publish mode_changed failed");
             }
         }
@@ -87,15 +91,14 @@ impl PttRuntime {
                 Mode::Open => "Mic — open",
                 Mode::Ptt => "Mic — push-to-talk",
             };
-            if let Err(e) = self.client.notify(title, "").await {
+            if let Err(e) = host.notify(title, "").await {
                 tracing::warn!(?e, "notify failed");
             }
         }
 
         if let Some(tx) = fx.transmit_changed {
             let payload = json!({ "transmitting": tx });
-            if let Err(e) = self
-                .client
+            if let Err(e) = host
                 .event_publish("tideline-ptt:transmit_changed", payload)
                 .await
             {
@@ -108,7 +111,7 @@ impl PttRuntime {
             cfg_lock.mode = mode;
             let snapshot = cfg_lock.clone();
             drop(cfg_lock);
-            if let Err(e) = config::save(&self.client, self.namespace, &snapshot).await {
+            if let Err(e) = config::save(host, self.namespace, &snapshot).await {
                 tracing::warn!(?e, "config save failed");
             }
         }
@@ -123,11 +126,7 @@ impl PttRuntime {
             "capture_method": cm,
             "error": err,
         });
-        if let Err(e) = self
-            .client
-            .event_publish("tideline-ptt:state_changed", payload)
-            .await
-        {
+        if let Err(e) = host.event_publish("tideline-ptt:state_changed", payload).await {
             tracing::warn!(?e, "event_publish state_changed failed");
         }
     }
