@@ -1,17 +1,58 @@
 pub mod binding;
 pub mod evdev_listener;
 pub mod mute;
+#[allow(dead_code)] // T14: removed once tideline-notifications plugin replaces this
 pub mod notify;
 pub mod portal_listener;
 pub mod state;
+#[allow(dead_code)] // T14: removed once tideline-tones plugin replaces this
 pub mod tones;
 pub mod wave_xlr;
 
+use crate::ptt::state::Tone;
 use crate::{AppConfig, AppState, Mode};
 use serde::Serialize;
 use state::Effects;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager};
+
+fn tone_str(t: Option<Tone>) -> serde_json::Value {
+    match t {
+        Some(Tone::Up) => serde_json::Value::String("up".into()),
+        Some(Tone::Down) => serde_json::Value::String("down".into()),
+        None => serde_json::Value::Null,
+    }
+}
+
+fn mode_str(m: Mode) -> &'static str {
+    match m {
+        Mode::Open => "open",
+        Mode::Ptt => "ptt",
+    }
+}
+
+/// Pure helper - takes a publish closure so it is testable without a real bus.
+pub(crate) fn publish_ptt_events<F: Fn(&str, serde_json::Value)>(
+    publish: &F,
+    state: &state::PttState,
+    fx: &state::Effects,
+) {
+    publish(
+        "tideline-ptt:state_changed",
+        serde_json::json!({
+            "mode":         mode_str(state.mode),
+            "hold_active":  state.hold_active,
+            "transmitting": state.transmitting(),
+            "play_tone":    tone_str(fx.play_tone),
+        }),
+    );
+    if let Some(mode) = fx.notify_mode {
+        publish(
+            "tideline-ptt:mode_changed",
+            serde_json::json!({ "mode": mode_str(mode) }),
+        );
+    }
+}
 
 /// Which capture path is providing PTT shortcuts. Determines what UI surface
 /// the Settings panel renders (portal info vs. raw evdev binding capture).
@@ -92,18 +133,12 @@ pub fn apply_effects(app: &AppHandle, runtime: &PttRuntime, fx: &Effects) {
             *runtime.last_error.lock().unwrap() = Some(format!("mute failed: {}", e));
         }
     }
-    if let Some(tone) = fx.play_tone {
-        tones::play(tone, cfg_snapshot.ptt.tones_enabled, cfg_snapshot.ptt.tones_volume);
-    }
     if let Some(led) = fx.set_led {
         if cfg_snapshot.ptt.led_enabled {
             if let Err(e) = wave_xlr::set_led(led) {
                 eprintln!("ptt LED set failed: {}", e); // non-fatal
             }
         }
-    }
-    if let Some(mode) = fx.notify_mode {
-        notify::notify_mode(mode);
     }
     if let Some(mode) = fx.persist_mode {
         let st = app.state::<AppState>();
@@ -112,6 +147,25 @@ pub fn apply_effects(app: &AppHandle, runtime: &PttRuntime, fx: &Effects) {
         if let Err(e) = crate::save_config_to_disk(&cfg) {
             eprintln!("ptt mode persist failed: {}", e);
         }
+    }
+    {
+        let registry = app
+            .state::<Arc<tideline_host::PluginRegistry>>()
+            .inner()
+            .clone();
+        let bus = registry.bus.clone();
+        let s_now = *runtime.state.lock().unwrap();
+        let fx_clone = fx.clone();
+        tauri::async_runtime::spawn(async move {
+            let publish = |topic: &str, payload: serde_json::Value| {
+                let bus = bus.clone();
+                let topic = topic.to_string();
+                tauri::async_runtime::spawn(async move {
+                    bus.publish_native(&topic, payload).await;
+                });
+            };
+            publish_ptt_events(&publish, &s_now, &fx_clone);
+        });
     }
     emit_state(app, runtime);
 }
@@ -135,4 +189,110 @@ pub fn handle_release(app: &AppHandle, runtime: &Arc<PttRuntime>) {
     let fx = state::hold_release(&mut s);
     drop(s);
     apply_effects(app, runtime, &fx);
+}
+
+#[cfg(test)]
+mod publish_tests {
+    use super::*;
+    use crate::ptt::state::{self, Effects, LedColor, Tone};
+    use crate::Mode;
+
+    #[derive(Default, Clone)]
+    struct CapturedBus {
+        events: std::sync::Arc<std::sync::Mutex<Vec<(String, serde_json::Value)>>>,
+    }
+    impl CapturedBus {
+        fn publish(&self, topic: &str, payload: serde_json::Value) {
+            self.events.lock().unwrap().push((topic.to_string(), payload));
+        }
+        fn drain(&self) -> Vec<(String, serde_json::Value)> {
+            std::mem::take(&mut *self.events.lock().unwrap())
+        }
+    }
+
+    fn make_state(mode: Mode, hold: bool) -> state::PttState {
+        state::PttState { mode, hold_active: hold }
+    }
+    fn bus_pub<'a>(b: &'a CapturedBus) -> impl Fn(&str, serde_json::Value) + 'a {
+        move |t, p| b.publish(t, p)
+    }
+
+    #[test]
+    fn hold_press_publishes_state_changed_with_play_tone_up() {
+        let bus = CapturedBus::default();
+        let s = make_state(Mode::Ptt, true);
+        let fx = Effects {
+            set_muted: Some(false),
+            play_tone: Some(Tone::Up),
+            set_led: Some(LedColor::Blue),
+            notify_mode: None,
+            persist_mode: None,
+        };
+        publish_ptt_events(&bus_pub(&bus), &s, &fx);
+        let events = bus.drain();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].0, "tideline-ptt:state_changed");
+        assert_eq!(events[0].1["mode"], "ptt");
+        assert_eq!(events[0].1["hold_active"], true);
+        assert_eq!(events[0].1["transmitting"], true);
+        assert_eq!(events[0].1["play_tone"], "up");
+    }
+
+    #[test]
+    fn hold_release_publishes_play_tone_down() {
+        let bus = CapturedBus::default();
+        let s = make_state(Mode::Ptt, false);
+        let fx = Effects {
+            set_muted: Some(true),
+            play_tone: Some(Tone::Down),
+            set_led: Some(LedColor::Red),
+            notify_mode: None,
+            persist_mode: None,
+        };
+        publish_ptt_events(&bus_pub(&bus), &s, &fx);
+        let events = bus.drain();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].1["play_tone"], "down");
+    }
+
+    #[test]
+    fn toggle_mode_publishes_both_state_and_mode_changed() {
+        let bus = CapturedBus::default();
+        let s = make_state(Mode::Ptt, false);
+        let fx = Effects {
+            set_muted: Some(true),
+            play_tone: None,
+            set_led: Some(LedColor::Red),
+            notify_mode: Some(Mode::Ptt),
+            persist_mode: Some(Mode::Ptt),
+        };
+        publish_ptt_events(&bus_pub(&bus), &s, &fx);
+        let events = bus.drain();
+        assert_eq!(events.len(), 2);
+        let topics: Vec<&str> = events.iter().map(|(t, _)| t.as_str()).collect();
+        assert!(topics.contains(&"tideline-ptt:state_changed"));
+        assert!(topics.contains(&"tideline-ptt:mode_changed"));
+        let mode_evt = events.iter().find(|(t, _)| t == "tideline-ptt:mode_changed").unwrap();
+        assert_eq!(mode_evt.1["mode"], "ptt");
+        let state_evt = events.iter().find(|(t, _)| t == "tideline-ptt:state_changed").unwrap();
+        assert_eq!(state_evt.1["play_tone"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn idle_apply_publishes_state_changed_with_null_tone() {
+        let bus = CapturedBus::default();
+        let s = make_state(Mode::Open, false);
+        let fx = Effects {
+            set_muted: None,
+            play_tone: None,
+            set_led: None,
+            notify_mode: None,
+            persist_mode: None,
+        };
+        publish_ptt_events(&bus_pub(&bus), &s, &fx);
+        let events = bus.drain();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].0, "tideline-ptt:state_changed");
+        assert_eq!(events[0].1["play_tone"], serde_json::Value::Null);
+    }
 }
