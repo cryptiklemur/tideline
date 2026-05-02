@@ -32,8 +32,6 @@ libpulse-simple-binding = "2.28"
 freedesktop-icons = "0.4"
 base64 = "0.22"
 evdev = "0.13"
-notify-rust = "4.11"
-rodio = { version = "0.20", default-features = false, features = ["wav"] }
 ashpd = { version = "0.13", default-features = false, features = ["tokio", "global_shortcuts"] }
 zbus = { version = "5", default-features = false, features = ["tokio"] }
 futures-util = "0.3"

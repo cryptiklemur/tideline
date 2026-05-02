@@ -1,12 +1,8 @@
 pub mod binding;
 pub mod evdev_listener;
 pub mod mute;
-#[allow(dead_code)] // T14: removed once tideline-notifications plugin replaces this
-pub mod notify;
 pub mod portal_listener;
 pub mod state;
-#[allow(dead_code)] // T14: removed once tideline-tones plugin replaces this
-pub mod tones;
 pub mod wave_xlr;
 
 use crate::ptt::state::Tone;
