@@ -30,6 +30,72 @@ pub fn is_present_at(root: &Path) -> bool {
     false
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LedColor {
+    Blue,
+    Red,
+}
+
+/// Writes the requested color to the device. Errors are non-fatal at the
+/// runtime layer (LED state is best-effort).
+pub trait LedWriter: Send + Sync {
+    fn set_led(&self, color: LedColor) -> Result<(), String>;
+}
+
+/// Real hardware writer. Re-opens the HID handle on each call so hot-plug
+/// after the plugin started still works.
+pub struct HidLedWriter;
+
+impl LedWriter for HidLedWriter {
+    fn set_led(&self, color: LedColor) -> Result<(), String> {
+        if !is_present() {
+            return Err("Wave XLR not present".to_string());
+        }
+        let api = hidapi::HidApi::new().map_err(|e| format!("hidapi init: {e}"))?;
+        let dev = api
+            .open(VID, PID)
+            .map_err(|e| format!("hidapi open: {e}"))?;
+        let report = build_color_report(color);
+        dev.send_feature_report(&report)
+            .map_err(|e| format!("hidapi feature report: {e}"))
+    }
+}
+
+/// 64-byte feature report. Report id = 0x03; byte 1 selects the color
+/// bank (0x10 = mute / red, 0x11 = unmute / blue); remaining bytes 0.
+/// Layout reverse-engineered from the previous native stub (see git
+/// history of `src-tauri/src/ptt/wave_xlr.rs`); not documented by Elgato.
+pub fn build_color_report(color: LedColor) -> [u8; 64] {
+    let mut report = [0u8; 64];
+    report[0] = 0x03;
+    report[1] = match color {
+        LedColor::Red => 0x10,
+        LedColor::Blue => 0x11,
+    };
+    report
+}
+
+#[cfg(test)]
+mod color_tests {
+    use super::*;
+
+    #[test]
+    fn report_red_byte() {
+        let r = build_color_report(LedColor::Red);
+        assert_eq!(r[0], 0x03);
+        assert_eq!(r[1], 0x10);
+        assert!(r[2..].iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn report_blue_byte() {
+        let b = build_color_report(LedColor::Blue);
+        assert_eq!(b[0], 0x03);
+        assert_eq!(b[1], 0x11);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
