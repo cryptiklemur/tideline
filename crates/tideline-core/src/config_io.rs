@@ -56,6 +56,7 @@ pub fn default_config() -> AppConfig {
         ],
         keybinds: HashMap::new(),
         ptt: PttConfig::default(),
+        plugin_data: HashMap::new(),
     }
 }
 
@@ -74,6 +75,21 @@ pub fn migrate_config(cfg: &mut AppConfig, raw: &str) {
     cfg.mixes = vec![hp_mix, sp_mix];
 }
 
+fn migrate_legacy_tones_into_plugin_data(raw: &mut serde_json::Value) {
+    let Some(ptt) = raw.get_mut("ptt").and_then(|v| v.as_object_mut()) else { return; };
+    let enabled = ptt.remove("tones_enabled").and_then(|v| v.as_bool()).unwrap_or(true);
+    let volume  = ptt.remove("tones_volume").and_then(|v| v.as_u64()).unwrap_or(100) as u32;
+    let plugin_data = raw
+        .as_object_mut()
+        .expect("AppConfig is a JSON object")
+        .entry("plugin_data".to_string())
+        .or_insert_with(|| serde_json::json!({}));
+    let pd_obj = plugin_data.as_object_mut().expect("plugin_data is an object");
+    pd_obj.entry("tideline-tones".to_string()).or_insert_with(|| {
+        serde_json::json!({ "enabled": enabled, "volume": volume })
+    });
+}
+
 pub fn load_config_from(path: &Path) -> io::Result<AppConfig> {
     let raw = fs::read_to_string(path)?;
     let needs_backup = !raw.contains("\"uuid\"");
@@ -83,7 +99,10 @@ pub fn load_config_from(path: &Path) -> io::Result<AppConfig> {
             fs::write(&backup_path, &raw)?;
         }
     }
-    let mut cfg: AppConfig = serde_json::from_str(&raw)
+    let mut json: serde_json::Value = serde_json::from_str(&raw)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    migrate_legacy_tones_into_plugin_data(&mut json);
+    let mut cfg: AppConfig = serde_json::from_value(json)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
     migrate_config(&mut cfg, &raw);
     Ok(cfg)
@@ -116,4 +135,65 @@ pub fn load_config() -> AppConfig {
 
 pub fn save_config_to_disk(cfg: &AppConfig) -> Result<(), String> {
     save_config_to(&config_path(), cfg).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tones_migration_tests {
+    use super::migrate_legacy_tones_into_plugin_data;
+    use serde_json::json;
+
+    #[test]
+    fn legacy_tones_fields_move_into_plugin_data() {
+        let mut raw = json!({
+            "ptt": {
+                "input_device": "mic",
+                "tones_enabled": false,
+                "tones_volume": 60
+            }
+        });
+        migrate_legacy_tones_into_plugin_data(&mut raw);
+        let ptt = raw.get("ptt").unwrap().as_object().unwrap();
+        assert!(!ptt.contains_key("tones_enabled"));
+        assert!(!ptt.contains_key("tones_volume"));
+        let tones = raw
+            .pointer("/plugin_data/tideline-tones")
+            .expect("tones plugin data");
+        assert_eq!(tones["enabled"], json!(false));
+        assert_eq!(tones["volume"], json!(60));
+    }
+
+    #[test]
+    fn missing_legacy_fields_use_defaults() {
+        let mut raw = json!({
+            "ptt": { "input_device": "mic" }
+        });
+        migrate_legacy_tones_into_plugin_data(&mut raw);
+        let tones = raw
+            .pointer("/plugin_data/tideline-tones")
+            .expect("tones plugin data");
+        assert_eq!(tones["enabled"], json!(true));
+        assert_eq!(tones["volume"], json!(100));
+    }
+
+    #[test]
+    fn does_not_overwrite_existing_plugin_data() {
+        let mut raw = json!({
+            "ptt": {
+                "tones_enabled": false,
+                "tones_volume": 60
+            },
+            "plugin_data": {
+                "tideline-tones": { "enabled": true, "volume": 75 }
+            }
+        });
+        migrate_legacy_tones_into_plugin_data(&mut raw);
+        let ptt = raw.get("ptt").unwrap().as_object().unwrap();
+        assert!(!ptt.contains_key("tones_enabled"));
+        assert!(!ptt.contains_key("tones_volume"));
+        let tones = raw
+            .pointer("/plugin_data/tideline-tones")
+            .expect("tones plugin data");
+        assert_eq!(tones["enabled"], json!(true));
+        assert_eq!(tones["volume"], json!(75));
+    }
 }

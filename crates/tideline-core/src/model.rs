@@ -102,16 +102,10 @@ pub struct PttConfig {
     pub hold_binding: Option<Binding>,
     #[serde(default)]
     pub input_device: String,
-    #[serde(default = "default_tones_enabled")]
-    pub tones_enabled: bool,
-    #[serde(default = "default_tones_volume")]
-    pub tones_volume: u32,
     #[serde(default = "default_led_enabled")]
     pub led_enabled: bool,
 }
 
-fn default_tones_enabled() -> bool { true }
-fn default_tones_volume() -> u32 { 100 }
 fn default_led_enabled() -> bool { true }
 
 impl Default for PttConfig {
@@ -121,8 +115,6 @@ impl Default for PttConfig {
             mode_toggle_binding: None,
             hold_binding: None,
             input_device: String::new(),
-            tones_enabled: true,
-            tones_volume: 100,
             led_enabled: true,
         }
     }
@@ -138,6 +130,8 @@ pub struct AppConfig {
     pub keybinds: HashMap<String, KeybindAction>,
     #[serde(default)]
     pub ptt: PttConfig,
+    #[serde(default)]
+    pub plugin_data: HashMap<String, Value>,
 }
 
 impl AppConfig {

@@ -1346,21 +1346,6 @@ fn ptt_set_input_device(device: String, state: State<'_, AppState>) -> Result<()
 }
 
 #[tauri::command]
-fn ptt_set_tones_enabled(enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
-    let mut cfg = state.config.lock().unwrap();
-    cfg.ptt.tones_enabled = enabled;
-    save_config_to_disk(&cfg)
-}
-
-#[tauri::command]
-fn ptt_set_tones_volume(volume: u32, state: State<'_, AppState>) -> Result<(), String> {
-    let v = volume.min(100);
-    let mut cfg = state.config.lock().unwrap();
-    cfg.ptt.tones_volume = v;
-    save_config_to_disk(&cfg)
-}
-
-#[tauri::command]
 fn ptt_toggle_mode(app: AppHandle) {
     let runtime = app.state::<Arc<crate::ptt::PttRuntime>>().inner().clone();
     crate::ptt::handle_toggle(&app, &runtime);
@@ -1880,8 +1865,6 @@ pub fn run() {
             ptt_set_mode_toggle_binding,
             ptt_set_hold_binding,
             ptt_set_input_device,
-            ptt_set_tones_enabled,
-            ptt_set_tones_volume,
             ptt_toggle_mode,
             ptt_get_state,
             ptt_detect_wave_xlr,
