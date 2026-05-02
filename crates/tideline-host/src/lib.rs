@@ -9,6 +9,7 @@ pub mod transport;
 pub mod runtime;
 pub mod supervisor;
 pub mod install;
+pub mod backend;
 pub mod dispatcher;
 pub mod registry;
 pub mod rpc;

@@ -44,6 +44,7 @@ pub struct InstalledPlugin {
 pub struct PluginRegistry {
     pub bus: EventBus,
     pub installed: RwLock<HashMap<String, Arc<InstalledPlugin>>>,
+    pub backend: RwLock<Arc<dyn crate::backend::HostBackend>>,
     contributions: RwLock<Contributions>,
     contrib_tx: tokio::sync::broadcast::Sender<Contributions>,
     iframe_tx: tokio::sync::broadcast::Sender<IframeMessage>,
@@ -81,11 +82,19 @@ impl PluginRegistry {
         Self {
             bus: EventBus::new(),
             installed: RwLock::new(HashMap::new()),
+            backend: RwLock::new(crate::backend::null_backend()),
             contributions: RwLock::new(Contributions::default()),
             contrib_tx,
             iframe_tx,
             test_handlers: RwLock::new(HashMap::new()),
         }
+    }
+
+    /// Inject a real host-side backend (mute via pactl, OS notifications, etc.).
+    /// The default `NullBackend` makes every call a no-op so headless harnesses
+    /// keep working without OS plumbing.
+    pub async fn set_backend(&self, backend: Arc<dyn crate::backend::HostBackend>) {
+        *self.backend.write().await = backend;
     }
 
     pub fn inspect(&self, source: &Path) -> Result<InstallPreview, RegistryError> {
@@ -171,10 +180,12 @@ impl PluginRegistry {
 
             let transport = runtime.transport().await.expect("transport present after spawn");
             let mut requests = transport.take_requests().await;
+            let backend = registry.backend.read().await.clone();
             let ctx = crate::dispatcher::HostContext {
                 plugin_id: plugin_id.clone(),
                 granted: plugin.granted.clone(),
                 bus: registry.bus.clone(),
+                backend,
             };
             tokio::spawn(async move {
                 while let Some((req, ack)) = requests.recv().await {

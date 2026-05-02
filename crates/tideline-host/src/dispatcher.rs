@@ -2,6 +2,7 @@ use std::sync::Arc;
 use serde_json::{json, Value};
 use tokio::sync::RwLock;
 use tideline_sdk::rpc::{RpcError, error_codes};
+use crate::backend::HostBackend;
 use crate::capabilities::{CapabilitySet, required_capability_for};
 use crate::events::EventBus;
 
@@ -10,6 +11,7 @@ pub struct HostContext {
     pub plugin_id: String,
     pub granted: Arc<RwLock<CapabilitySet>>,
     pub bus: EventBus,
+    pub backend: Arc<dyn HostBackend>,
 }
 
 pub async fn dispatch(ctx: &HostContext, method: &str, params: Option<Value>)
@@ -73,10 +75,24 @@ pub async fn dispatch(ctx: &HostContext, method: &str, params: Option<Value>)
         "host/mix.attach_data" => Ok(json!({})),
         "host/levels.read" => Ok(json!({"channels": []})),
         "host/audio.play" => Ok(json!({})),
-        "host/source.set_mute" => Ok(json!({})),
+        "host/source.set_mute" => {
+            let p = params.unwrap_or(json!({}));
+            let node = p.get("node").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let muted = p.get("muted").and_then(|v| v.as_bool()).unwrap_or(false);
+            ctx.backend.set_source_mute(&node, muted).await
+                .map_err(|e| RpcError { code: error_codes::INTERNAL_ERROR, message: e, data: None })?;
+            Ok(json!({}))
+        }
         "host/sources.list" => Ok(json!({"sources": []})),
         "host/audio.position" => Ok(json!({})),
-        "host/notify" | "host/notify.send" => Ok(json!({})),
+        "host/notify" | "host/notify.send" => {
+            let p = params.unwrap_or(json!({}));
+            let title = p.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let body = p.get("body").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            ctx.backend.notify(&title, &body).await
+                .map_err(|e| RpcError { code: error_codes::INTERNAL_ERROR, message: e, data: None })?;
+            Ok(json!({}))
+        }
         "host/ui.iframe.show" | "host/ui.iframe.hide" => Ok(json!({})),
         "host/ui.channel_overlay.focus" => Ok(json!({})),
         "host/keybind.register" | "host/keybind.unregister" => Ok(json!({})),
@@ -109,6 +125,7 @@ mod tests {
             plugin_id: "p".into(),
             granted: Arc::new(RwLock::new(CapabilitySet::default())),
             bus: EventBus::new(),
+            backend: crate::backend::null_backend(),
         };
         let err = dispatch(&ctx, "host/log.write", Some(json!({}))).await.unwrap_err();
         assert_eq!(err.code, error_codes::CAPABILITY_DENIED);
@@ -120,6 +137,7 @@ mod tests {
             plugin_id: "p".into(),
             granted: Arc::new(RwLock::new(CapabilitySet::new([LogWrite]))),
             bus: EventBus::new(),
+            backend: crate::backend::null_backend(),
         };
         dispatch(&ctx, "host/log.write", Some(json!({"level":"info","message":"ok"})))
             .await.unwrap();
@@ -131,7 +149,68 @@ mod tests {
             plugin_id: "p".into(),
             granted: Arc::new(RwLock::new(CapabilitySet::default())),
             bus: EventBus::new(),
+            backend: crate::backend::null_backend(),
         };
         dispatch(&ctx, "host/initialize", None).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn set_mute_routes_to_backend() {
+        use async_trait::async_trait;
+        use std::sync::Mutex;
+
+        struct RecordingBackend {
+            calls: Mutex<Vec<(String, bool)>>,
+        }
+        #[async_trait]
+        impl crate::backend::HostBackend for RecordingBackend {
+            async fn set_source_mute(&self, node: &str, muted: bool) -> Result<(), String> {
+                self.calls.lock().unwrap().push((node.to_string(), muted));
+                Ok(())
+            }
+            async fn notify(&self, _t: &str, _b: &str) -> Result<(), String> { Ok(()) }
+        }
+
+        let backend = Arc::new(RecordingBackend { calls: Mutex::new(Vec::new()) });
+        let ctx = HostContext {
+            plugin_id: "p".into(),
+            granted: Arc::new(RwLock::new(CapabilitySet::new([AudioMute]))),
+            bus: EventBus::new(),
+            backend: backend.clone(),
+        };
+        dispatch(&ctx, "host/source.set_mute", Some(json!({"node": "src", "muted": true})))
+            .await.unwrap();
+        let calls = backend.calls.lock().unwrap().clone();
+        assert_eq!(calls, vec![("src".to_string(), true)]);
+    }
+
+    #[tokio::test]
+    async fn notify_routes_to_backend() {
+        use async_trait::async_trait;
+        use std::sync::Mutex;
+
+        struct RecordingBackend {
+            calls: Mutex<Vec<(String, String)>>,
+        }
+        #[async_trait]
+        impl crate::backend::HostBackend for RecordingBackend {
+            async fn set_source_mute(&self, _n: &str, _m: bool) -> Result<(), String> { Ok(()) }
+            async fn notify(&self, title: &str, body: &str) -> Result<(), String> {
+                self.calls.lock().unwrap().push((title.to_string(), body.to_string()));
+                Ok(())
+            }
+        }
+
+        let backend = Arc::new(RecordingBackend { calls: Mutex::new(Vec::new()) });
+        let ctx = HostContext {
+            plugin_id: "p".into(),
+            granted: Arc::new(RwLock::new(CapabilitySet::new([TrayContribute]))),
+            bus: EventBus::new(),
+            backend: backend.clone(),
+        };
+        dispatch(&ctx, "host/notify", Some(json!({"title": "T", "body": "B"})))
+            .await.unwrap();
+        let calls = backend.calls.lock().unwrap().clone();
+        assert_eq!(calls, vec![("T".to_string(), "B".to_string())]);
     }
 }
