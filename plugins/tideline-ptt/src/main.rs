@@ -12,6 +12,8 @@ mod portal_listener;
 mod runtime;
 #[allow(dead_code)]
 mod state;
+#[allow(dead_code)]
+mod ui;
 
 fn main() {
     eprintln!("tideline-ptt: not yet implemented");
