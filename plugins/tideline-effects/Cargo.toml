@@ -15,6 +15,7 @@ path = "src/lib.rs"
 
 [dependencies]
 tideline-sdk = { path = "../../crates/tideline-sdk" }
+tideline-core = { path = "../../crates/tideline-core" }
 carla-sys = { path = "../../crates/carla-sys" }
 tokio = { version = "1", features = ["full"] }
 async-trait = "0.1"
