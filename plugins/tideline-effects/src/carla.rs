@@ -40,6 +40,13 @@ pub struct Host {
     handle: CarlaHostHandle,
 }
 
+// SAFETY: CarlaHostHandle is a raw pointer to a process-wide singleton owned
+// by libcarla_standalone2. We never copy or alias it concurrently — access is
+// serialized through a `tokio::sync::Mutex<Host>` in `EffectsState`. Send
+// allows us to store the host in async state shared across tokio worker
+// threads. We deliberately do NOT impl Sync; concurrent FFI calls would be UB.
+unsafe impl Send for Host {}
+
 impl Host {
     pub fn init() -> Result<Self, CarlaError> {
         // SAFETY: carla_standalone_host_init is safe to call once per process.

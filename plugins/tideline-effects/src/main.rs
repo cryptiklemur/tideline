@@ -2,6 +2,7 @@
 mod carla;
 #[allow(dead_code)]
 mod effect;
+#[allow(dead_code)]
 mod state;
 #[allow(dead_code)]
 mod discovery;
