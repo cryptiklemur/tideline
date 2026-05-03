@@ -101,7 +101,7 @@ impl Plugin for EffectsPlugin {
         match topic.as_str() {
             "host:pipewire_restarting" => engine::on_pipewire_restart_pre(self.state.clone()).await,
             "host:pipewire_restarted" => engine::on_pipewire_restart_post(self.state.clone()).await,
-            "host:channel_removed" => state::on_channel_removed(self.state.clone(), params).await,
+            "host:channel_removed" => state::on_channel_removed(self.state.clone(), Some(params)).await,
             other => warn!(topic = other, "unexpected event topic"),
         }
     }
