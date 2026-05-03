@@ -1,5 +1,6 @@
 #[allow(dead_code)]
 mod carla;
+#[allow(dead_code)]
 mod effect;
 mod state;
 mod discovery;
@@ -13,6 +14,7 @@ mod iframe_bridge;
 mod overlay_render;
 mod persist;
 mod namespace_config;
+#[allow(dead_code)]
 mod util;
 
 use std::sync::Arc;
