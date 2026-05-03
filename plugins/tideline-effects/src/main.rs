@@ -11,6 +11,7 @@ mod discovery;
 mod discovery_runner;
 mod engine;
 mod pipewire_contributor;
+#[allow(dead_code)]
 mod install;
 mod install_runner;
 mod install_script;
