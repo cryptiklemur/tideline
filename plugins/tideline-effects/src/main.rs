@@ -5,6 +5,7 @@ mod effect;
 mod state;
 #[allow(dead_code)]
 mod discovery;
+#[allow(dead_code)]
 mod discovery_runner;
 mod engine;
 mod pipewire_contributor;
