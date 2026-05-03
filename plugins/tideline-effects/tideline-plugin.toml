@@ -1,0 +1,42 @@
+[plugin]
+schema = 1
+id = "tideline-effects"
+name = "Effects"
+version = "0.1.0"
+publisher = "Tideline"
+
+[host]
+api = "1.x"
+
+[entry]
+exec = "bin/tideline-effects"
+
+[capabilities]
+required = [
+  "pipewire.contribute",
+  "channel.attach_data",
+  "channel.read",
+  "config.namespace.read",
+  "config.namespace.write",
+  "ui.channel_overlay",
+  "ui.iframe",
+  "events.publish",
+]
+optional = [
+  "process.spawn",
+]
+
+[contributes]
+publishes_topics = [
+  "tideline-effects:rack_state_changed",
+  "tideline-effects:scan_complete",
+  "tideline-effects:engine_unhealthy",
+]
+
+[[contributes.channel_overlays]]
+slot = "sidebar_badge"
+icon = "fx"
+
+[[contributes.channel_overlays]]
+slot = "detail"
+icon = "fx"

@@ -4373,7 +4373,11 @@ name = "tideline-effects"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
+ "base64 0.22.1",
  "carla-sys",
+ "dirs 5.0.1",
+ "once_cell",
  "serde",
  "serde_json",
  "tempfile",
@@ -4381,6 +4385,7 @@ dependencies = [
  "tideline-sdk",
  "tokio",
  "tracing",
+ "tracing-subscriber",
  "uuid",
  "walkdir",
 ]
