@@ -8,11 +8,32 @@ use carla_sys::*;
 use std::ffi::{CStr, CString};
 use std::os::raw::c_uint;
 use std::path::Path;
+use thiserror::Error;
 
 // Bindgen exposes BinaryType / PluginType as scoped consts under the
 // CarlaBackend namespace. Re-bind the two values we need.
 const BINARY_NATIVE: CarlaBackend_BinaryType = CarlaBackend_BinaryType_BINARY_POSIX64;
 const PLUGIN_LV2: CarlaBackend_PluginType = CarlaBackend_PluginType_PLUGIN_LV2;
+
+#[derive(Debug, Error)]
+pub enum CarlaError {
+    #[error("carla_standalone_host_init returned null")]
+    HostInit,
+    #[error("engine_init({driver}) failed")]
+    EngineInit { driver: String },
+    #[error("engine_close failed")]
+    EngineClose,
+    #[error("add_lv2({uri}) failed")]
+    AddLv2 { uri: String },
+    #[error("save_plugin_state failed")]
+    SaveState,
+    #[error("load_plugin_state failed")]
+    LoadState,
+    #[error("invalid utf8 path")]
+    Utf8Path,
+    #[error("ffi: {0}")]
+    Ffi(String),
+}
 
 #[derive(Debug)]
 pub struct Host {
@@ -20,11 +41,11 @@ pub struct Host {
 }
 
 impl Host {
-    pub fn init() -> Result<Self, String> {
+    pub fn init() -> Result<Self, CarlaError> {
         // SAFETY: carla_standalone_host_init is safe to call once per process.
         let handle = unsafe { carla_standalone_host_init() };
         if handle.is_null() {
-            return Err("carla_standalone_host_init returned null".into());
+            return Err(CarlaError::HostInit);
         }
         Ok(Self { handle })
     }
@@ -43,15 +64,17 @@ impl Host {
             .collect()
     }
 
-    pub fn engine_init(&self, driver: &str, client_name: &str) -> Result<(), String> {
-        let d = CString::new(driver).map_err(|e| e.to_string())?;
-        let c = CString::new(client_name).map_err(|e| e.to_string())?;
+    pub fn engine_init(&self, driver: &str, client_name: &str) -> Result<(), CarlaError> {
+        let d = CString::new(driver).map_err(|e| CarlaError::Ffi(e.to_string()))?;
+        let c = CString::new(client_name).map_err(|e| CarlaError::Ffi(e.to_string()))?;
         // SAFETY: pointers live for duration of call, handle is valid.
         let ok = unsafe { carla_engine_init(self.handle, d.as_ptr(), c.as_ptr()) };
         if ok {
             Ok(())
         } else {
-            Err(format!("engine_init({driver}) failed"))
+            Err(CarlaError::EngineInit {
+                driver: driver.to_string(),
+            })
         }
     }
 
@@ -59,11 +82,24 @@ impl Host {
         unsafe { carla_engine_close(self.handle) }
     }
 
+    /// Number of plugins currently loaded in the engine.
+    pub fn current_plugin_count(&self) -> u32 {
+        // SAFETY: handle is valid for the lifetime of Host.
+        unsafe { carla_get_current_plugin_count(self.handle) }
+    }
+
+    /// Number of parameters exposed by a plugin id.
+    pub fn parameter_count(&self, plugin_id: u32) -> u32 {
+        // SAFETY: handle is valid for the lifetime of Host.
+        unsafe { carla_get_parameter_count(self.handle, plugin_id as c_uint) }
+    }
+
     /// Add an LV2 plugin by URI. Returns the new plugin id (the count - 1
     /// after add, which is the carla convention).
-    pub fn add_lv2(&self, uri: &str, name: &str) -> Result<u32, String> {
-        let n = CString::new(name).map_err(|e| e.to_string())?;
-        let u = CString::new(uri).map_err(|e| e.to_string())?;
+    pub fn add_lv2(&self, uri: &str, name: &str) -> Result<u32, CarlaError> {
+        let n = CString::new(name).map_err(|e| CarlaError::Ffi(e.to_string()))?;
+        let u = CString::new(uri).map_err(|e| CarlaError::Ffi(e.to_string()))?;
+        let before = self.current_plugin_count();
         // SAFETY: arguments live for duration of call.
         let ok = unsafe {
             carla_add_plugin(
@@ -79,13 +115,17 @@ impl Host {
             )
         };
         if !ok {
-            return Err(format!("add_lv2({uri}) failed"));
+            return Err(CarlaError::AddLv2 {
+                uri: uri.to_string(),
+            });
         }
-        let count = unsafe { carla_get_current_plugin_count(self.handle) };
-        if count == 0 {
-            return Err("plugin count was 0 after add".into());
+        let after = self.current_plugin_count();
+        if after != before + 1 {
+            return Err(CarlaError::Ffi(format!(
+                "count drifted: before={before} after={after}"
+            )));
         }
-        Ok(count - 1)
+        Ok(after - 1)
     }
 
     pub fn set_active(&self, plugin_id: u32, on: bool) {
@@ -96,23 +136,25 @@ impl Host {
         unsafe { carla_set_parameter_value(self.handle, plugin_id as c_uint, param_id, value) }
     }
 
-    pub fn save_state(&self, plugin_id: u32, path: &Path) -> Result<(), String> {
-        let p = CString::new(path.to_str().ok_or("non-utf8 path")?).map_err(|e| e.to_string())?;
+    pub fn save_state(&self, plugin_id: u32, path: &Path) -> Result<(), CarlaError> {
+        let p = CString::new(path.to_str().ok_or(CarlaError::Utf8Path)?)
+            .map_err(|e| CarlaError::Ffi(e.to_string()))?;
         let ok = unsafe { carla_save_plugin_state(self.handle, plugin_id as c_uint, p.as_ptr()) };
         if ok {
             Ok(())
         } else {
-            Err("save_plugin_state failed".into())
+            Err(CarlaError::SaveState)
         }
     }
 
-    pub fn load_state(&self, plugin_id: u32, path: &Path) -> Result<(), String> {
-        let p = CString::new(path.to_str().ok_or("non-utf8 path")?).map_err(|e| e.to_string())?;
+    pub fn load_state(&self, plugin_id: u32, path: &Path) -> Result<(), CarlaError> {
+        let p = CString::new(path.to_str().ok_or(CarlaError::Utf8Path)?)
+            .map_err(|e| CarlaError::Ffi(e.to_string()))?;
         let ok = unsafe { carla_load_plugin_state(self.handle, plugin_id as c_uint, p.as_ptr()) };
         if ok {
             Ok(())
         } else {
-            Err("load_plugin_state failed".into())
+            Err(CarlaError::LoadState)
         }
     }
 
@@ -126,5 +168,25 @@ impl Host {
 
     pub fn show_custom_ui(&self, plugin_id: u32, show: bool) {
         unsafe { carla_show_custom_ui(self.handle, plugin_id as c_uint, show) }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn host_init_and_drivers() {
+        let host = Host::init().expect("host init");
+        let drivers = host.drivers();
+        assert!(!drivers.is_empty(), "expected at least one driver");
+    }
+
+    #[test]
+    fn carla_error_displays() {
+        let e = CarlaError::AddLv2 {
+            uri: "http://x".into(),
+        };
+        assert_eq!(format!("{e}"), "add_lv2(http://x) failed");
     }
 }

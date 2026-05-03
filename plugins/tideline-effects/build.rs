@@ -13,6 +13,12 @@ fn main() {
             let arg = format!("-Wl,-rpath,{rpath}");
             println!("cargo:rustc-link-arg-bins={arg}");
             println!("cargo:rustc-link-arg-tests={arg}");
+            // `rustc-link-arg-tests` only covers integration tests (tests/*.rs).
+            // Lib unit tests live in the `--lib --test` artifact, which needs
+            // the rpath too — emit it via `rustc-link-arg` so the lib unit
+            // test binary picks it up. (rlib builds skip the linker so the
+            // flag is harmless there.)
+            println!("cargo:rustc-link-arg={arg}");
         }
     }
     println!("cargo:rerun-if-changed=build.rs");
