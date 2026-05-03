@@ -9,7 +9,10 @@ use tokio::sync::{Mutex, RwLock, mpsc};
 use tideline_sdk::Capability;
 use tideline_sdk::types::Manifest;
 use crate::capabilities::CapabilitySet;
-use crate::contributions::Contributions;
+use crate::contributions::{
+    ChannelOverlayContribution, Contributions, IframeSurface, KeybindActionContribution,
+    SettingsSectionContribution, StatusPillContribution, TrayItemContribution,
+};
 use crate::events::EventBus;
 use crate::iframe::IframeMessage;
 use crate::install::{self, InstallError, InstallPreview};
@@ -29,6 +32,48 @@ pub enum RegistryError {
     #[error("plugin {0:?} already running")] AlreadyRunning(String),
     #[error("transport: {0}")] Transport(String),
     #[error("plugin error: {0}")] PluginError(String),
+    #[error("invalid contribution payload: {0}")] InvalidContribution(String),
+    #[error("unknown contribution kind {0:?}")] UnknownContributionKind(String),
+}
+
+/// Discriminator for the 6 contribution surface types. Used by the dispatcher
+/// to route `host/contributions.{register,unregister}_*` RPC calls into the
+/// shared `register_contribution` / `unregister_contribution` paths.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContribKind {
+    SettingsSection,
+    StatusPill,
+    ChannelOverlay,
+    IframeSurface,
+    TrayItem,
+    KeybindAction,
+}
+
+impl ContribKind {
+    pub fn from_str(s: &str) -> Option<Self> {
+        Some(match s {
+            "settings_section" => Self::SettingsSection,
+            "status_pill" => Self::StatusPill,
+            "channel_overlay" => Self::ChannelOverlay,
+            "iframe_surface" => Self::IframeSurface,
+            "tray_item" => Self::TrayItem,
+            "keybind_action" => Self::KeybindAction,
+            _ => return None,
+        })
+    }
+}
+
+/// Per-plugin contribution storage. The registry maintains one of these per
+/// running plugin; the global `Contributions` aggregate is recomputed (and
+/// broadcast) on every register/unregister/evict.
+#[derive(Debug, Clone, Default)]
+pub struct PluginContribs {
+    pub settings_sections: Vec<SettingsSectionContribution>,
+    pub status_pills: Vec<StatusPillContribution>,
+    pub channel_overlays: Vec<ChannelOverlayContribution>,
+    pub iframe_surfaces: Vec<IframeSurface>,
+    pub tray_items: Vec<TrayItemContribution>,
+    pub keybind_actions: Vec<KeybindActionContribution>,
 }
 
 type TestHandler = Arc<dyn Fn(&str, &serde_json::Value) -> serde_json::Value + Send + Sync>;
@@ -46,6 +91,7 @@ pub struct PluginRegistry {
     pub installed: RwLock<HashMap<String, Arc<InstalledPlugin>>>,
     pub backend: RwLock<Arc<dyn crate::backend::HostBackend>>,
     contributions: RwLock<Contributions>,
+    pub plugin_contribs: RwLock<HashMap<String, PluginContribs>>,
     contrib_tx: tokio::sync::broadcast::Sender<Contributions>,
     iframe_tx: tokio::sync::broadcast::Sender<IframeMessage>,
     test_handlers: RwLock<HashMap<String, TestHandler>>,
@@ -84,6 +130,7 @@ impl PluginRegistry {
             installed: RwLock::new(HashMap::new()),
             backend: RwLock::new(crate::backend::null_backend()),
             contributions: RwLock::new(Contributions::default()),
+            plugin_contribs: RwLock::new(HashMap::new()),
             contrib_tx,
             iframe_tx,
             test_handlers: RwLock::new(HashMap::new()),
@@ -217,6 +264,7 @@ impl PluginRegistry {
                     if let Some(p) = reg2.installed.read().await.get(&pid2).cloned() {
                         *p.runtime.lock().await = None;
                         reg2.bus.unregister_plugin(&pid2).await;
+                        reg2.evict_plugin_contributions(&pid2).await;
                         let decision = p.crash_tracker.lock().await.record(Instant::now(), code);
                         if let CrashDecision::RestartAfter(delay) = decision {
                             let reg3 = reg2.clone();
@@ -239,6 +287,7 @@ impl PluginRegistry {
             if let Some(rt) = p.runtime.lock().await.take() { rt.shutdown().await; }
             self.bus.unregister_plugin(plugin_id).await;
         }
+        self.evict_plugin_contributions(plugin_id).await;
     }
 
     pub async fn revoke_capability(&self, plugin_id: &str, cap: Capability)
@@ -314,6 +363,147 @@ impl PluginRegistry {
     pub async fn set_contributions(&self, c: Contributions) {
         *self.contributions.write().await = c.clone();
         let _ = self.contrib_tx.send(c);
+    }
+
+    /// Register a UI surface contribution for `plugin_id`.
+    ///
+    /// Parses `payload` into the appropriate typed contribution, stamps
+    /// `plugin_id` from the host context (overriding any value the plugin
+    /// supplied), and stores it in the per-plugin slot for `kind`.
+    ///
+    /// Replace-on-same-id semantics: if a contribution with the same
+    /// surface_id (or item_id / action_id for tray and keybind) already
+    /// exists for this plugin, it is replaced in place.
+    ///
+    /// After mutation, the global aggregate is recomputed and broadcast.
+    pub async fn register_contribution(
+        &self,
+        plugin_id: &str,
+        kind: ContribKind,
+        mut payload: serde_json::Value,
+    ) -> Result<(), RegistryError> {
+        if let Some(obj) = payload.as_object_mut() {
+            obj.insert("plugin_id".into(), serde_json::Value::String(plugin_id.to_string()));
+        } else {
+            return Err(RegistryError::InvalidContribution(
+                "payload must be a JSON object".into(),
+            ));
+        }
+        {
+            let mut map = self.plugin_contribs.write().await;
+            let entry = map.entry(plugin_id.to_string()).or_default();
+            match kind {
+                ContribKind::SettingsSection => {
+                    let c: SettingsSectionContribution = serde_json::from_value(payload)
+                        .map_err(|e| RegistryError::InvalidContribution(e.to_string()))?;
+                    if let Some(slot) = entry.settings_sections.iter_mut()
+                        .find(|x| x.surface_id == c.surface_id)
+                    { *slot = c; } else { entry.settings_sections.push(c); }
+                }
+                ContribKind::StatusPill => {
+                    let c: StatusPillContribution = serde_json::from_value(payload)
+                        .map_err(|e| RegistryError::InvalidContribution(e.to_string()))?;
+                    if let Some(slot) = entry.status_pills.iter_mut()
+                        .find(|x| x.surface_id == c.surface_id)
+                    { *slot = c; } else { entry.status_pills.push(c); }
+                }
+                ContribKind::ChannelOverlay => {
+                    let c: ChannelOverlayContribution = serde_json::from_value(payload)
+                        .map_err(|e| RegistryError::InvalidContribution(e.to_string()))?;
+                    if let Some(slot) = entry.channel_overlays.iter_mut()
+                        .find(|x| x.surface_id == c.surface_id)
+                    { *slot = c; } else { entry.channel_overlays.push(c); }
+                }
+                ContribKind::IframeSurface => {
+                    let c: IframeSurface = serde_json::from_value(payload)
+                        .map_err(|e| RegistryError::InvalidContribution(e.to_string()))?;
+                    if let Some(slot) = entry.iframe_surfaces.iter_mut()
+                        .find(|x| x.surface_id == c.surface_id)
+                    { *slot = c; } else { entry.iframe_surfaces.push(c); }
+                }
+                ContribKind::TrayItem => {
+                    let c: TrayItemContribution = serde_json::from_value(payload)
+                        .map_err(|e| RegistryError::InvalidContribution(e.to_string()))?;
+                    if let Some(slot) = entry.tray_items.iter_mut()
+                        .find(|x| x.item_id == c.item_id)
+                    { *slot = c; } else { entry.tray_items.push(c); }
+                }
+                ContribKind::KeybindAction => {
+                    let c: KeybindActionContribution = serde_json::from_value(payload)
+                        .map_err(|e| RegistryError::InvalidContribution(e.to_string()))?;
+                    if let Some(slot) = entry.keybind_actions.iter_mut()
+                        .find(|x| x.action_id == c.action_id)
+                    { *slot = c; } else { entry.keybind_actions.push(c); }
+                }
+            }
+        }
+        self.recompute_and_broadcast().await;
+        Ok(())
+    }
+
+    /// Remove a contribution by id from `plugin_id`'s slot for `kind`.
+    /// `id` is the surface_id (or item_id / action_id for tray and keybind).
+    pub async fn unregister_contribution(
+        &self,
+        plugin_id: &str,
+        kind: ContribKind,
+        id: &str,
+    ) -> Result<(), RegistryError> {
+        {
+            let mut map = self.plugin_contribs.write().await;
+            let Some(entry) = map.get_mut(plugin_id) else { return Ok(()) };
+            match kind {
+                ContribKind::SettingsSection => {
+                    entry.settings_sections.retain(|x| x.surface_id != id);
+                }
+                ContribKind::StatusPill => {
+                    entry.status_pills.retain(|x| x.surface_id != id);
+                }
+                ContribKind::ChannelOverlay => {
+                    entry.channel_overlays.retain(|x| x.surface_id != id);
+                }
+                ContribKind::IframeSurface => {
+                    entry.iframe_surfaces.retain(|x| x.surface_id != id);
+                }
+                ContribKind::TrayItem => {
+                    entry.tray_items.retain(|x| x.item_id != id);
+                }
+                ContribKind::KeybindAction => {
+                    entry.keybind_actions.retain(|x| x.action_id != id);
+                }
+            }
+        }
+        self.recompute_and_broadcast().await;
+        Ok(())
+    }
+
+    /// Drop all contributions registered by `plugin_id` and rebroadcast the
+    /// aggregate. Called when a plugin stops cleanly or its process exits.
+    pub async fn evict_plugin_contributions(&self, plugin_id: &str) {
+        let removed = {
+            let mut map = self.plugin_contribs.write().await;
+            map.remove(plugin_id).is_some()
+        };
+        if removed {
+            self.recompute_and_broadcast().await;
+        }
+    }
+
+    async fn recompute_and_broadcast(&self) {
+        let merged = {
+            let map = self.plugin_contribs.read().await;
+            let mut merged = Contributions::default();
+            for entry in map.values() {
+                merged.settings_sections.extend(entry.settings_sections.iter().cloned());
+                merged.status_pills.extend(entry.status_pills.iter().cloned());
+                merged.channel_overlays.extend(entry.channel_overlays.iter().cloned());
+                merged.iframe_surfaces.extend(entry.iframe_surfaces.iter().cloned());
+                merged.tray_items.extend(entry.tray_items.iter().cloned());
+                merged.keybind_actions.extend(entry.keybind_actions.iter().cloned());
+            }
+            merged
+        };
+        self.set_contributions(merged).await;
     }
 
     pub async fn send_request(
