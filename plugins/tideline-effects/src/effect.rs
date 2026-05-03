@@ -29,6 +29,21 @@ pub struct ChannelEffectsData {
     pub chain_bypassed: bool,
 }
 
+impl Effect {
+    /// Convenience constructor for an LV2 effect with a fresh id, default name from URI.
+    pub fn new_lv2(uri: impl Into<String>) -> Self {
+        let uri = uri.into();
+        Self {
+            id: Uuid::new_v4(),
+            format: PluginFormat::Lv2,
+            uri: uri.clone(),
+            display_name: uri,
+            bypassed: false,
+            state_b64: None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

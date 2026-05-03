@@ -1,5 +1,6 @@
 //! tideline-effects plugin — library surface re-exports for tests.
 pub mod carla;
+pub mod chain_ops;
 pub mod effect;
 pub mod state;
 pub mod discovery;

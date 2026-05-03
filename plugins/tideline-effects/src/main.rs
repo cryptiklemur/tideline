@@ -1,6 +1,8 @@
 #[allow(dead_code)]
 mod carla;
 #[allow(dead_code)]
+mod chain_ops;
+#[allow(dead_code)]
 mod effect;
 #[allow(dead_code)]
 mod state;

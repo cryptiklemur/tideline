@@ -2,8 +2,10 @@
 use std::sync::Arc;
 use tideline_sdk::HostClient;
 use tokio::sync::Mutex;
+use uuid::Uuid;
 
 use crate::carla::Host;
+use crate::effect::Effect;
 
 pub struct EffectsState {
     #[allow(dead_code)]
@@ -35,6 +37,28 @@ impl EffectsState {
 
     pub async fn engine(&self) -> Option<Arc<Mutex<Host>>> {
         self.engine.lock().await.clone()
+    }
+
+    pub async fn attach_effect(&self, _channel_id: Uuid, _effect: Effect, _plugin_id: u32) {
+        // W7.T15 — push (effect_id → plugin_id) into per-channel map and chain order.
+    }
+
+    pub async fn detach_effect(&self, _channel_id: Uuid, _effect_id: Uuid) {
+        // W7.T15 — remove from per-channel map + chain order.
+    }
+
+    pub async fn lookup_plugin_id(&self, _channel_id: Uuid, _effect_id: Uuid) -> Option<u32> {
+        // W7.T15 — read from per-channel map. Stub returns None.
+        None
+    }
+
+    pub async fn chain_order(&self, _channel_id: Uuid) -> Vec<Uuid> {
+        // W7.T15 — return per-channel chain order vec. Stub returns empty.
+        Vec::new()
+    }
+
+    pub async fn set_chain_order(&self, _channel_id: Uuid, _order: Vec<Uuid>) {
+        // W7.T15 — replace chain order vec.
     }
 }
 
