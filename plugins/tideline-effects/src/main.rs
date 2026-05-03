@@ -13,7 +13,9 @@ mod engine;
 mod pipewire_contributor;
 #[allow(dead_code)]
 mod install;
+#[allow(dead_code)]
 mod install_runner;
+#[allow(dead_code)]
 mod install_script;
 mod iframe_bridge;
 mod overlay_render;
