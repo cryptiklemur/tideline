@@ -3,6 +3,7 @@ mod carla;
 #[allow(dead_code)]
 mod effect;
 mod state;
+#[allow(dead_code)]
 mod discovery;
 mod discovery_runner;
 mod engine;
