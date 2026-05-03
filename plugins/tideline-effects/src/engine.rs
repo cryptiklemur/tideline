@@ -57,6 +57,22 @@ pub async fn on_pipewire_restart_post(state: Arc<EffectsState>) {
     crate::state::reapply_all_chains(state).await;
 }
 
+pub async fn mark_unhealthy(state: Arc<EffectsState>, reason: String) {
+    warn!(reason = %reason, "marking carla engine unhealthy");
+    if let Some(h) = state.take_engine().await {
+        // Best-effort close; ignore failure.
+        let _ = h.lock().await.engine_close();
+    }
+    if let Some(host) = state.host.get() {
+        let _ = host
+            .event_publish(
+                "tideline-effects:engine_unhealthy",
+                serde_json::json!({ "reason": reason }),
+            )
+            .await;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -88,5 +104,18 @@ mod tests {
     fn case_insensitive_match() {
         let avail = vec!["jack".into()];
         assert_eq!(select_driver(&avail).as_deref(), Some("jack"));
+    }
+}
+
+#[cfg(test)]
+mod resilience_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn unhealthy_clears_engine_slot() {
+        let state = crate::state::EffectsState::new("test");
+        // No engine started — mark_unhealthy should still be safe.
+        mark_unhealthy(state.clone(), "test".into()).await;
+        assert!(state.engine().await.is_none());
     }
 }

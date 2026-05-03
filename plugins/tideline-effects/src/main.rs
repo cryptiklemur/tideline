@@ -4,7 +4,6 @@ mod carla;
 mod chain_ops;
 #[allow(dead_code)]
 mod effect;
-#[allow(dead_code)]
 mod state;
 #[allow(dead_code)]
 mod discovery;

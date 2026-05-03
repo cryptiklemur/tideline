@@ -1,10 +1,20 @@
 //! Per-channel chain operations against the in-process carla engine.
+use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::carla::CarlaError;
 use crate::effect::Effect;
 use crate::state::EffectsState;
+
+/// Convert a panic payload into a printable string.
+fn panic_msg(panic: Box<dyn std::any::Any + Send>) -> String {
+    panic
+        .downcast_ref::<&str>()
+        .map(|s| (*s).to_string())
+        .or_else(|| panic.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "carla FFI panicked".into())
+}
 
 pub async fn add_effect(
     state: Arc<EffectsState>,
@@ -16,8 +26,18 @@ pub async fn add_effect(
         .await
         .ok_or_else(|| CarlaError::Ffi("engine not initialized".into()))?;
     let host = engine.lock().await;
-    let plugin_id = host.add_lv2(&effect.uri, &format!("{channel_id}:{}", effect.id))?;
+    let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+        host.add_lv2(&effect.uri, &format!("{channel_id}:{}", effect.id))
+    }));
     drop(host);
+    let plugin_id = match result {
+        Ok(r) => r?,
+        Err(panic) => {
+            let msg = panic_msg(panic);
+            crate::engine::mark_unhealthy(state.clone(), msg.clone()).await;
+            return Err(CarlaError::Ffi(msg));
+        }
+    };
     state.attach_effect(channel_id, effect, plugin_id).await;
     Ok(plugin_id)
 }
@@ -36,10 +56,17 @@ pub async fn remove_effect(
         .await
         .ok_or_else(|| CarlaError::Ffi(format!("effect {effect_id} not in chain {channel_id}")))?;
     let host = engine.lock().await;
-    if !host.remove(plugin_id) {
-        return Err(CarlaError::Ffi("remove_plugin returned false".into()));
-    }
+    let result = std::panic::catch_unwind(AssertUnwindSafe(|| host.remove(plugin_id)));
     drop(host);
+    match result {
+        Ok(true) => {}
+        Ok(false) => return Err(CarlaError::Ffi("remove_plugin returned false".into())),
+        Err(panic) => {
+            let msg = panic_msg(panic);
+            crate::engine::mark_unhealthy(state.clone(), msg.clone()).await;
+            return Err(CarlaError::Ffi(msg));
+        }
+    }
     state.detach_effect(channel_id, effect_id).await;
     Ok(())
 }
@@ -75,10 +102,22 @@ pub async fn reorder_chain(
             .lookup_plugin_id(channel_id, working[target_idx])
             .await
             .ok_or_else(|| CarlaError::Ffi("reorder: plugin id lookup".into()))?;
-        if !host.switch_plugins(a_pid, b_pid) {
-            return Err(CarlaError::Ffi(format!(
-                "switch_plugins({a_pid},{b_pid}) failed"
-            )));
+        let result =
+            std::panic::catch_unwind(AssertUnwindSafe(|| host.switch_plugins(a_pid, b_pid)));
+        match result {
+            Ok(true) => {}
+            Ok(false) => {
+                drop(host);
+                return Err(CarlaError::Ffi(format!(
+                    "switch_plugins({a_pid},{b_pid}) failed"
+                )));
+            }
+            Err(panic) => {
+                drop(host);
+                let msg = panic_msg(panic);
+                crate::engine::mark_unhealthy(state.clone(), msg.clone()).await;
+                return Err(CarlaError::Ffi(msg));
+            }
         }
         working.swap(cur_idx, target_idx);
     }
