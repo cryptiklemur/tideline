@@ -19,6 +19,7 @@ mod install_runner;
 mod install_script;
 mod iframe_bridge;
 mod overlay_render;
+#[allow(dead_code)]
 mod persist;
 mod namespace_config;
 #[allow(dead_code)]
