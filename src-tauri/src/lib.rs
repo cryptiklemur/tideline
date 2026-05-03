@@ -1289,6 +1289,9 @@ fn window_drag(window: tauri::Window) -> Result<(), String> {
     window.start_dragging().map_err(|e| e.to_string())
 }
 
+#[derive(Default)]
+struct TrayItemsCache(Mutex<Vec<tideline_host::contributions::TrayItemContribution>>);
+
 fn build_tray_menu(
     app: &AppHandle<Wry>,
     cfg: &AppConfig,
@@ -1320,12 +1323,10 @@ fn build_tray_menu(
         let sep = PredefinedMenuItem::separator(app)?;
         menu.append(&sep)?;
     }
-    let mut tray_items = if let Some(registry) = app.try_state::<Arc<tideline_host::PluginRegistry>>() {
-        let registry = registry.inner().clone();
-        tauri::async_runtime::block_on(registry.contributions()).tray_items
-    } else {
-        Vec::new()
-    };
+    let mut tray_items = app
+        .try_state::<TrayItemsCache>()
+        .map(|c| c.inner().0.lock().unwrap().clone())
+        .unwrap_or_default();
     tray_items.sort_by(|a, b| {
         b.priority
             .cmp(&a.priority)
@@ -1544,10 +1545,16 @@ pub fn run() {
                 });
             }
 
+            app.manage(TrayItemsCache::default());
             let mut tray_rx = plugin_registry.subscribe_contributions();
+            let registry_for_tray = plugin_registry.clone();
             let app_handle_for_tray = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 while tray_rx.recv().await.is_ok() {
+                    let items = registry_for_tray.contributions().await.tray_items;
+                    if let Some(cache) = app_handle_for_tray.try_state::<TrayItemsCache>() {
+                        *cache.inner().0.lock().unwrap() = items;
+                    }
                     refresh_tray_menu(&app_handle_for_tray);
                 }
             });
