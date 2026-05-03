@@ -75,6 +75,18 @@ pub fn required_capability_for(method: &str) -> Option<Capability> {
         "host/ui.iframe.show" | "host/ui.iframe.hide" => UiIframe,
         "host/ui.channel_overlay.focus" => UiChannelOverlay,
         "host/keybind.register" | "host/keybind.unregister" => KeybindRegister,
+        "host/contributions.register_settings_section"
+            | "host/contributions.unregister_settings_section" => UiSettingsSection,
+        "host/contributions.register_status_pill"
+            | "host/contributions.unregister_status_pill" => UiStatusPill,
+        "host/contributions.register_channel_overlay"
+            | "host/contributions.unregister_channel_overlay" => UiChannelOverlay,
+        "host/contributions.register_iframe_surface"
+            | "host/contributions.unregister_iframe_surface" => UiIframe,
+        "host/contributions.register_tray_item"
+            | "host/contributions.unregister_tray_item" => TrayContribute,
+        "host/contributions.register_keybind_action"
+            | "host/contributions.unregister_keybind_action" => KeybindRegister,
         "host/pipewire.contribute" => PipewireContribute,
         "host/config.namespace.get" => ConfigNamespaceRead,
         "host/config.namespace.set" => ConfigNamespaceWrite,

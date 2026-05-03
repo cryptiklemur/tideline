@@ -49,20 +49,6 @@ pub enum ContribKind {
     KeybindAction,
 }
 
-impl ContribKind {
-    pub fn from_str(s: &str) -> Option<Self> {
-        Some(match s {
-            "settings_section" => Self::SettingsSection,
-            "status_pill" => Self::StatusPill,
-            "channel_overlay" => Self::ChannelOverlay,
-            "iframe_surface" => Self::IframeSurface,
-            "tray_item" => Self::TrayItem,
-            "keybind_action" => Self::KeybindAction,
-            _ => return None,
-        })
-    }
-}
-
 /// Per-plugin contribution storage. The registry maintains one of these per
 /// running plugin; the global `Contributions` aggregate is recomputed (and
 /// broadcast) on every register/unregister/evict.
@@ -233,6 +219,7 @@ impl PluginRegistry {
                 granted: plugin.granted.clone(),
                 bus: registry.bus.clone(),
                 backend,
+                registry: Arc::downgrade(&registry),
             };
             tokio::spawn(async move {
                 while let Some((req, ack)) = requests.recv().await {

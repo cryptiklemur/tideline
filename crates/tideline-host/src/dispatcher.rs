@@ -1,10 +1,11 @@
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use serde_json::{json, Value};
 use tokio::sync::RwLock;
 use tideline_sdk::rpc::{RpcError, error_codes};
 use crate::backend::HostBackend;
 use crate::capabilities::{CapabilitySet, required_capability_for};
 use crate::events::EventBus;
+use crate::registry::{ContribKind, PluginRegistry};
 
 #[derive(Clone)]
 pub struct HostContext {
@@ -12,6 +13,54 @@ pub struct HostContext {
     pub granted: Arc<RwLock<CapabilitySet>>,
     pub bus: EventBus,
     pub backend: Arc<dyn HostBackend>,
+    /// Weak ref so the dispatcher can call back into the registry to mutate
+    /// per-plugin contribution storage. Weak avoids the Arc cycle that would
+    /// otherwise leak the registry once the dispatcher loop is spawned.
+    pub registry: Weak<PluginRegistry>,
+}
+
+async fn register_contrib(ctx: &HostContext, kind: ContribKind, params: Option<Value>)
+    -> Result<Value, RpcError>
+{
+    let payload = params.unwrap_or(json!({}));
+    let registry = ctx.registry.upgrade().ok_or_else(|| RpcError {
+        code: error_codes::INTERNAL_ERROR,
+        message: "registry has been dropped".into(),
+        data: None,
+    })?;
+    registry.register_contribution(&ctx.plugin_id, kind, payload).await
+        .map_err(|e| RpcError {
+            code: error_codes::INVALID_PARAMS,
+            message: e.to_string(),
+            data: None,
+        })?;
+    Ok(json!({}))
+}
+
+async fn unregister_contrib(
+    ctx: &HostContext,
+    kind: ContribKind,
+    params: Option<Value>,
+    id_field: &str,
+) -> Result<Value, RpcError> {
+    let p = params.unwrap_or(json!({}));
+    let id = p.get(id_field).and_then(|v| v.as_str()).ok_or_else(|| RpcError {
+        code: error_codes::INVALID_PARAMS,
+        message: format!("missing {id_field} string"),
+        data: None,
+    })?;
+    let registry = ctx.registry.upgrade().ok_or_else(|| RpcError {
+        code: error_codes::INTERNAL_ERROR,
+        message: "registry has been dropped".into(),
+        data: None,
+    })?;
+    registry.unregister_contribution(&ctx.plugin_id, kind, id).await
+        .map_err(|e| RpcError {
+            code: error_codes::INTERNAL_ERROR,
+            message: e.to_string(),
+            data: None,
+        })?;
+    Ok(json!({}))
 }
 
 pub async fn dispatch(ctx: &HostContext, method: &str, params: Option<Value>)
@@ -96,6 +145,42 @@ pub async fn dispatch(ctx: &HostContext, method: &str, params: Option<Value>)
         "host/ui.iframe.show" | "host/ui.iframe.hide" => Ok(json!({})),
         "host/ui.channel_overlay.focus" => Ok(json!({})),
         "host/keybind.register" | "host/keybind.unregister" => Ok(json!({})),
+        "host/contributions.register_settings_section" => {
+            register_contrib(ctx, ContribKind::SettingsSection, params).await
+        }
+        "host/contributions.unregister_settings_section" => {
+            unregister_contrib(ctx, ContribKind::SettingsSection, params, "surface_id").await
+        }
+        "host/contributions.register_status_pill" => {
+            register_contrib(ctx, ContribKind::StatusPill, params).await
+        }
+        "host/contributions.unregister_status_pill" => {
+            unregister_contrib(ctx, ContribKind::StatusPill, params, "surface_id").await
+        }
+        "host/contributions.register_channel_overlay" => {
+            register_contrib(ctx, ContribKind::ChannelOverlay, params).await
+        }
+        "host/contributions.unregister_channel_overlay" => {
+            unregister_contrib(ctx, ContribKind::ChannelOverlay, params, "surface_id").await
+        }
+        "host/contributions.register_iframe_surface" => {
+            register_contrib(ctx, ContribKind::IframeSurface, params).await
+        }
+        "host/contributions.unregister_iframe_surface" => {
+            unregister_contrib(ctx, ContribKind::IframeSurface, params, "surface_id").await
+        }
+        "host/contributions.register_tray_item" => {
+            register_contrib(ctx, ContribKind::TrayItem, params).await
+        }
+        "host/contributions.unregister_tray_item" => {
+            unregister_contrib(ctx, ContribKind::TrayItem, params, "item_id").await
+        }
+        "host/contributions.register_keybind_action" => {
+            register_contrib(ctx, ContribKind::KeybindAction, params).await
+        }
+        "host/contributions.unregister_keybind_action" => {
+            unregister_contrib(ctx, ContribKind::KeybindAction, params, "action_id").await
+        }
         "host/pipewire.contribute" => Ok(json!({})),
         "host/config.namespace.get" => Ok(json!({})),
         "host/config.namespace.set" => Ok(json!({})),
@@ -126,6 +211,7 @@ mod tests {
             granted: Arc::new(RwLock::new(CapabilitySet::default())),
             bus: EventBus::new(),
             backend: crate::backend::null_backend(),
+            registry: Weak::new(),
         };
         let err = dispatch(&ctx, "host/log.write", Some(json!({}))).await.unwrap_err();
         assert_eq!(err.code, error_codes::CAPABILITY_DENIED);
@@ -138,6 +224,7 @@ mod tests {
             granted: Arc::new(RwLock::new(CapabilitySet::new([LogWrite]))),
             bus: EventBus::new(),
             backend: crate::backend::null_backend(),
+            registry: Weak::new(),
         };
         dispatch(&ctx, "host/log.write", Some(json!({"level":"info","message":"ok"})))
             .await.unwrap();
@@ -150,6 +237,7 @@ mod tests {
             granted: Arc::new(RwLock::new(CapabilitySet::default())),
             bus: EventBus::new(),
             backend: crate::backend::null_backend(),
+            registry: Weak::new(),
         };
         dispatch(&ctx, "host/initialize", None).await.unwrap();
     }
@@ -177,6 +265,7 @@ mod tests {
             granted: Arc::new(RwLock::new(CapabilitySet::new([AudioMute]))),
             bus: EventBus::new(),
             backend: backend.clone(),
+            registry: Weak::new(),
         };
         dispatch(&ctx, "host/source.set_mute", Some(json!({"node": "src", "muted": true})))
             .await.unwrap();
@@ -207,10 +296,100 @@ mod tests {
             granted: Arc::new(RwLock::new(CapabilitySet::new([TrayContribute]))),
             bus: EventBus::new(),
             backend: backend.clone(),
+            registry: Weak::new(),
         };
         dispatch(&ctx, "host/notify", Some(json!({"title": "T", "body": "B"})))
             .await.unwrap();
         let calls = backend.calls.lock().unwrap().clone();
         assert_eq!(calls, vec![("T".to_string(), "B".to_string())]);
+    }
+
+    fn ctx_with_registry(reg: &Arc<PluginRegistry>, caps: impl IntoIterator<Item = tideline_sdk::Capability>) -> HostContext {
+        HostContext {
+            plugin_id: "io.test.dispatch".into(),
+            granted: Arc::new(RwLock::new(CapabilitySet::new(caps))),
+            bus: EventBus::new(),
+            backend: crate::backend::null_backend(),
+            registry: Arc::downgrade(reg),
+        }
+    }
+
+    #[tokio::test]
+    async fn register_status_pill_arm_writes_into_registry() {
+        let reg = PluginRegistry::new_for_test();
+        let ctx = ctx_with_registry(&reg, [UiStatusPill]);
+        dispatch(&ctx, "host/contributions.register_status_pill", Some(json!({
+            "surface_id": "main",
+            "label": "Hello"
+        }))).await.unwrap();
+        let snap = reg.contributions().await;
+        assert_eq!(snap.status_pills.len(), 1);
+        assert_eq!(snap.status_pills[0].plugin_id, "io.test.dispatch");
+        assert_eq!(snap.status_pills[0].label, "Hello");
+    }
+
+    #[tokio::test]
+    async fn register_arm_denied_without_capability() {
+        let reg = PluginRegistry::new_for_test();
+        let ctx = ctx_with_registry(&reg, []);
+        let err = dispatch(&ctx, "host/contributions.register_status_pill",
+            Some(json!({"surface_id": "x", "label": "X"})))
+            .await.unwrap_err();
+        assert_eq!(err.code, error_codes::CAPABILITY_DENIED);
+        assert_eq!(reg.contributions().await.status_pills.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn unregister_status_pill_arm_removes_from_registry() {
+        let reg = PluginRegistry::new_for_test();
+        let ctx = ctx_with_registry(&reg, [UiStatusPill]);
+        dispatch(&ctx, "host/contributions.register_status_pill", Some(json!({
+            "surface_id": "main", "label": "L"
+        }))).await.unwrap();
+        dispatch(&ctx, "host/contributions.unregister_status_pill",
+            Some(json!({"surface_id": "main"}))).await.unwrap();
+        assert_eq!(reg.contributions().await.status_pills.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn unregister_arm_rejects_missing_id_field() {
+        let reg = PluginRegistry::new_for_test();
+        let ctx = ctx_with_registry(&reg, [UiStatusPill]);
+        let err = dispatch(&ctx, "host/contributions.unregister_status_pill",
+            Some(json!({}))).await.unwrap_err();
+        assert_eq!(err.code, error_codes::INVALID_PARAMS);
+    }
+
+    #[tokio::test]
+    async fn each_register_arm_routes_to_correct_kind() {
+        let reg = PluginRegistry::new_for_test();
+        let ctx = ctx_with_registry(&reg, [
+            UiSettingsSection, UiStatusPill, UiChannelOverlay,
+            UiIframe, TrayContribute, KeybindRegister,
+        ]);
+        dispatch(&ctx, "host/contributions.register_settings_section",
+            Some(json!({"surface_id": "s", "title": "T", "tree": {}}))).await.unwrap();
+        dispatch(&ctx, "host/contributions.register_status_pill",
+            Some(json!({"surface_id": "p", "label": "L"}))).await.unwrap();
+        dispatch(&ctx, "host/contributions.register_channel_overlay",
+            Some(json!({
+                "surface_id": "o",
+                "placement": "detail",
+                "channel_filter": {"kind": "all"},
+                "tree": {}
+            }))).await.unwrap();
+        dispatch(&ctx, "host/contributions.register_iframe_surface",
+            Some(json!({"surface_id": "f", "entry_path": "u"}))).await.unwrap();
+        dispatch(&ctx, "host/contributions.register_tray_item",
+            Some(json!({"item_id": "t", "label": "Q"}))).await.unwrap();
+        dispatch(&ctx, "host/contributions.register_keybind_action",
+            Some(json!({"action_id": "a", "label": "X"}))).await.unwrap();
+        let snap = reg.contributions().await;
+        assert_eq!(snap.settings_sections.len(), 1);
+        assert_eq!(snap.status_pills.len(), 1);
+        assert_eq!(snap.channel_overlays.len(), 1);
+        assert_eq!(snap.iframe_surfaces.len(), 1);
+        assert_eq!(snap.tray_items.len(), 1);
+        assert_eq!(snap.keybind_actions.len(), 1);
     }
 }
