@@ -1,3 +1,4 @@
+use crate::discovery_runner::discover_one;
 use crate::effect::PluginFormat;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -95,6 +96,56 @@ pub fn save_cache(cache: &PluginScanCache) -> std::io::Result<()> {
     let path = cache_path();
     let bytes = serde_json::to_vec_pretty(cache)?;
     std::fs::write(&path, bytes)
+}
+
+pub async fn scan_all() -> PluginScanCache {
+    let mut all = Vec::new();
+    for (format, dir) in plugin_search_paths() {
+        if !dir.exists() {
+            continue;
+        }
+        for entry in walkdir::WalkDir::new(&dir)
+            .max_depth(2)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            let path = entry.path();
+            let matches = match format {
+                PluginFormat::Lv2 => path.extension().map(|e| e == "lv2").unwrap_or(false)
+                    || path.file_name().map(|n| n.to_string_lossy().ends_with(".lv2")).unwrap_or(false),
+                PluginFormat::Vst3 => path.extension().map(|e| e == "vst3").unwrap_or(false),
+                PluginFormat::Vst2 => path.extension().map(|e| e == "so").unwrap_or(false)
+                    && path.parent().and_then(|p| p.file_name()).map(|n| n == "vst").unwrap_or(false),
+                PluginFormat::Clap => path.extension().map(|e| e == "clap").unwrap_or(false),
+            };
+            if !matches {
+                continue;
+            }
+            match discover_one(format, path).await {
+                Ok(mut found) => all.append(&mut found),
+                Err(e) => tracing::warn!(?e, ?path, "discovery failed for plugin"),
+            }
+        }
+    }
+    PluginScanCache {
+        scanned_at: SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0),
+        source_mtime_max: max_source_mtime(),
+        plugins: all,
+    }
+}
+
+pub async fn ensure_cached() -> PluginScanCache {
+    if let Some(c) = load_cache() {
+        if cache_is_fresh(&c) {
+            return c;
+        }
+    }
+    let fresh = scan_all().await;
+    let _ = save_cache(&fresh);
+    fresh
 }
 
 pub async fn run_first_boot(_state: Arc<EffectsState>) {
