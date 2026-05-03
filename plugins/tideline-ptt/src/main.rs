@@ -40,6 +40,19 @@ impl Plugin for PttPlugin {
             return;
         }
 
+        if let Err(e) = host
+            .register_settings_section(json!({
+                "surface_id": SECTION_ID,
+                "title": "Push to Talk",
+                "icon": { "name": "mic" },
+                "priority": 100,
+                "tree": {},
+            }))
+            .await
+        {
+            warn!(?e, "register_settings_section failed");
+        }
+
         match host.config_namespace_get(PLUGIN_ID).await {
             Ok(v) => {
                 let cfg = PluginConfig::from_value(&v);
