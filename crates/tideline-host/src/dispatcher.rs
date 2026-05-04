@@ -142,7 +142,7 @@ pub async fn dispatch(ctx: &HostContext, method: &str, params: Option<Value>)
                 .map_err(|e| RpcError { code: error_codes::INTERNAL_ERROR, message: e, data: None })?;
             Ok(json!({}))
         }
-        "host/ui.iframe.show" | "host/ui.iframe.hide" => Ok(json!({})),
+        "host/ui.iframe.show" | "host/ui.iframe.hide" | "host/ui.iframe.send" => Ok(json!({})),
         "host/ui.channel_overlay.focus" => Ok(json!({})),
         "host/keybind.register" | "host/keybind.unregister" => Ok(json!({})),
         "host/contributions.register_settings_section" => {

@@ -32,6 +32,8 @@ pub struct EffectsState {
     pub chains: Mutex<HashMap<Uuid, Vec<Uuid>>>,
     /// Concrete effect + carla plugin id, keyed (channel_id, effect_id).
     pub effects: Mutex<BTreeMap<(Uuid, Uuid), ChainSlot>>,
+    /// Per-channel chain bypass flag. Absent entry means false.
+    pub chain_bypass: Mutex<HashMap<Uuid, bool>>,
 }
 
 impl EffectsState {
@@ -42,6 +44,7 @@ impl EffectsState {
             engine: Mutex::new(None),
             chains: Mutex::new(HashMap::new()),
             effects: Mutex::new(BTreeMap::new()),
+            chain_bypass: Mutex::new(HashMap::new()),
         })
     }
 
@@ -89,6 +92,26 @@ impl EffectsState {
             .filter(|(_, v)| !v.is_empty())
             .map(|(k, _)| *k)
             .collect()
+    }
+
+    pub async fn set_effect_bypassed(&self, channel_id: Uuid, effect_id: Uuid, bypassed: bool) {
+        if let Some(slot) = self.effects.lock().await.get_mut(&(channel_id, effect_id)) {
+            slot.effect.bypassed = bypassed;
+        }
+    }
+
+    pub async fn set_effect_state_b64(&self, channel_id: Uuid, effect_id: Uuid, b64: String) {
+        if let Some(slot) = self.effects.lock().await.get_mut(&(channel_id, effect_id)) {
+            slot.effect.state_b64 = Some(b64);
+        }
+    }
+
+    pub async fn get_chain_bypass(&self, channel_id: Uuid) -> bool {
+        self.chain_bypass.lock().await.get(&channel_id).copied().unwrap_or(false)
+    }
+
+    pub async fn set_chain_bypass(&self, channel_id: Uuid, bypassed: bool) {
+        self.chain_bypass.lock().await.insert(channel_id, bypassed);
     }
 }
 

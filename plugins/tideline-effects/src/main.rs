@@ -1,11 +1,9 @@
 #[allow(dead_code)]
 mod carla;
-#[allow(dead_code)]
 mod chain_ops;
 #[allow(dead_code)]
 mod effect;
 mod state;
-#[allow(dead_code)]
 mod discovery;
 #[allow(dead_code)]
 mod discovery_runner;
@@ -13,7 +11,6 @@ mod engine;
 mod pipewire_contributor;
 #[allow(dead_code)]
 mod install;
-#[allow(dead_code)]
 mod install_runner;
 #[allow(dead_code)]
 mod install_script;

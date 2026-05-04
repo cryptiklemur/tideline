@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use async_trait::async_trait;
 use serde_json::{json, Value};
+use uuid::Uuid;
 use crate::transport::{SdkTransportError, StdioTransport};
 
 /// Abstraction over the JSON-RPC transport so `HostClient` can be unit-tested
@@ -113,6 +114,26 @@ impl HostClient {
         self.transport.call(
             "host/ui.channel_overlay.focus",
             Some(payload),
+            Duration::from_secs(2),
+        ).await.map(|_| ())
+    }
+
+    /// Send a typed message to a plugin-owned iframe surface. Payload must include
+    /// `surface_id` and the serialized OutboundMsg under `message`.
+    pub async fn ui_iframe_send(&self, surface_id: &str, message: Value) -> Result<(), SdkTransportError> {
+        self.transport.call(
+            "host/ui.iframe.send",
+            Some(json!({"surface_id": surface_id, "message": message})),
+            Duration::from_secs(2),
+        ).await.map(|_| ())
+    }
+
+    /// Persist plugin-owned data onto a channel record. The host stores this in
+    /// `channel.plugin_data[plugin_id]` and triggers downstream rebuilds.
+    pub async fn channel_attach_data(&self, channel_uuid: Uuid, data: Value) -> Result<(), SdkTransportError> {
+        self.transport.call(
+            "host/channel.attach_data",
+            Some(json!({"channel_uuid": channel_uuid, "data": data})),
             Duration::from_secs(2),
         ).await.map(|_| ())
     }

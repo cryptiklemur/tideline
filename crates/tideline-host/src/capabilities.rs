@@ -72,7 +72,7 @@ pub fn required_capability_for(method: &str) -> Option<Capability> {
         "host/sources.list" => AudioBackendStatus,
         "host/audio.position" => AudioPosition,
         "host/notify" | "host/notify.send" => TrayContribute,
-        "host/ui.iframe.show" | "host/ui.iframe.hide" => UiIframe,
+        "host/ui.iframe.show" | "host/ui.iframe.hide" | "host/ui.iframe.send" => UiIframe,
         "host/ui.channel_overlay.focus" => UiChannelOverlay,
         "host/keybind.register" | "host/keybind.unregister" => KeybindRegister,
         "host/contributions.register_settings_section"
