@@ -1,0 +1,73 @@
+:root {
+  color-scheme: dark;
+  --bg: #0e1014;
+  --bg-2: #161a21;
+  --fg: #d8dee9;
+  --fg-dim: #8a93a3;
+  --primary: #5eead4;
+  --warn: #f59e0b;
+  --error: #ef4444;
+  --border: #20242c;
+  --radius: 6px;
+  font-family: system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+body { margin: 0; padding: 16px; background: var(--bg); }
+
+.banner {
+  display: flex;
+  justify-content: space-between;
+  background: var(--bg-2);
+  border-left: 3px solid var(--warn);
+  padding: 12px;
+  border-radius: var(--radius);
+  margin-bottom: 12px;
+}
+
+.btn-primary { background: var(--primary); color: #000; padding: 6px 12px; border: 0; border-radius: var(--radius); cursor: pointer; }
+.btn-ghost { background: transparent; color: var(--fg); padding: 6px 12px; border: 1px solid var(--border); border-radius: var(--radius); cursor: pointer; }
+
+.chain-bypass { padding: 8px 0; }
+
+.effects-list { display: flex; flex-direction: column; gap: 8px; padding: 12px 0; }
+
+.effect-tile {
+  display: grid;
+  grid-template-columns: 24px 64px 1fr 64px 64px 32px;
+  gap: 8px;
+  align-items: center;
+  background: var(--bg-2);
+  padding: 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+
+.drag-handle { cursor: grab; color: var(--fg-dim); }
+.format-badge { font-size: 10px; padding: 2px 6px; border-radius: 4px; background: var(--border); color: var(--fg-dim); text-align: center; }
+.format-lv2 { background: #1e3a8a; color: #cfe; }
+.format-vst3 { background: #6b21a8; color: #fbe; }
+.format-vst2 { background: #4c1d95; color: #ddf; }
+.format-clap { background: #134e4a; color: #cfd; }
+.bypass-toggle { background: var(--primary); color: #000; border: 0; padding: 4px 8px; border-radius: 4px; cursor: pointer; }
+.bypass-toggle.bypassed { background: var(--border); color: var(--fg-dim); }
+.edit-btn, .delete-btn { background: transparent; color: var(--fg); border: 1px solid var(--border); border-radius: 4px; cursor: pointer; padding: 4px 8px; }
+
+.add-effect-btn { width: 100%; padding: 12px; background: var(--bg-2); color: var(--fg); border: 1px dashed var(--border); border-radius: var(--radius); cursor: pointer; }
+.add-effect-btn:hover { border-color: var(--primary); color: var(--primary); }
+
+.empty { color: var(--fg-dim); padding: 20px; text-align: center; }
+
+.picker-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.6);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 100;
+}
+.picker-panel { background: var(--bg-2); padding: 16px; border-radius: var(--radius); width: 480px; max-height: 70vh; overflow: auto; }
+.picker-panel input[type=text] { width: 100%; box-sizing: border-box; padding: 8px; background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 4px; }
+.picker-list h3 { font-size: 11px; color: var(--fg-dim); text-transform: uppercase; margin: 12px 0 4px; }
+.picker-item { display: grid; grid-template-columns: 64px 1fr auto; gap: 8px; align-items: center; padding: 8px; background: transparent; color: var(--fg); border: 0; border-radius: 4px; cursor: pointer; width: 100%; text-align: left; }
+.picker-item:hover { background: var(--border); }
+.picker-vendor { color: var(--fg-dim); font-size: 12px; }
