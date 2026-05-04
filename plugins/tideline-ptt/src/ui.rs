@@ -36,21 +36,42 @@ pub fn settings_section(cfg: &PluginConfig, capture: CaptureMethod, error: Optio
         }));
     }
 
-    if matches!(capture, CaptureMethod::Evdev) {
-        children.push(json!({
-            "kind": "binding_capture",
-            "id": "ptt-mode-toggle-binding",
-            "label": "Toggle mode",
-            "value": cfg.mode_toggle_binding,
-            "action": "tideline-ptt:set_mode_toggle_binding",
-        }));
-        children.push(json!({
-            "kind": "binding_capture",
-            "id": "ptt-hold-binding",
-            "label": "Hold to transmit",
-            "value": cfg.hold_binding,
-            "action": "tideline-ptt:set_hold_binding",
-        }));
+    match capture {
+        CaptureMethod::Evdev => {
+            children.push(json!({
+                "kind": "binding_capture",
+                "id": "ptt-mode-toggle-binding",
+                "label": "Mode toggle (tap)",
+                "sublabel": "Switches between Open mic and PTT",
+                "value": cfg.mode_toggle_binding,
+                "action": "tideline-ptt:set_mode_toggle_binding",
+            }));
+            children.push(json!({
+                "kind": "binding_capture",
+                "id": "ptt-hold-binding",
+                "label": "PTT hold",
+                "sublabel": "Hold to transmit while in PTT mode",
+                "value": cfg.hold_binding,
+                "action": "tideline-ptt:set_hold_binding",
+            }));
+        }
+        CaptureMethod::Portal => {
+            children.push(json!({
+                "kind": "label",
+                "id": "ptt-portal-info",
+                "text": "Shortcuts are managed by your desktop's GlobalShortcuts portal. Look for `mode_toggle` and `hold` under Tideline shortcuts.",
+                "muted": true,
+            }));
+            children.push(json!({
+                "kind": "button",
+                "id": "ptt-configure-shortcuts",
+                "text": "Configure shortcuts in System Settings",
+                "icon": { "name": "settings" },
+                "variant": "soft",
+                "action": "tideline-ptt:configure_shortcuts",
+            }));
+        }
+        CaptureMethod::None => {}
     }
 
     children.push(json!({

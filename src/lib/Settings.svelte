@@ -137,7 +137,7 @@ let outputCount = $derived(config.channels.filter(c => (c.kind ?? 'output') === 
             {/each}
             {#each pluginUi.contributions.settings_sections.slice().filter(s => !s.parent_surface_id).sort((a, b) => b.priority - a.priority || a.plugin_id.localeCompare(b.plugin_id)) as section (section.plugin_id + ':' + section.surface_id)}
                 {@const isActive = active.kind === 'plugin' && active.plugin_id === section.plugin_id && active.surface_id === section.surface_id}
-                {@const children = pluginUi.contributions.settings_sections.filter(s => s.plugin_id === section.plugin_id && s.parent_surface_id === section.surface_id).sort((a, b) => b.priority - a.priority)}
+                {@const children = pluginUi.contributions.settings_sections.filter(s => s.parent_surface_id === section.surface_id).sort((a, b) => b.priority - a.priority)}
                 <button
                     type="button"
                     class="flex items-center gap-2.5 px-2.5 py-2 rounded-md text-left transition-colors cursor-pointer
