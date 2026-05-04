@@ -34,6 +34,20 @@ impl Plugin for WaveXlrPlugin {
             error!(?e, "initialize failed");
             return;
         }
+        if self.present {
+            if let Err(e) = host
+                .register_settings_section(json!({
+                    "surface_id": SECTION_ID,
+                    "title": "Wave XLR",
+                    "icon": { "name": "microphone-stand" },
+                    "priority": 200,
+                    "tree": {},
+                }))
+                .await
+            {
+                warn!(?e, "register_settings_section failed");
+            }
+        }
         match host.config_namespace_get(PLUGIN_ID).await {
             Ok(v) => self.runtime.set_config(PluginConfig::from_value(&v)),
             Err(e) => warn!(?e, "config_namespace_get failed; using defaults"),

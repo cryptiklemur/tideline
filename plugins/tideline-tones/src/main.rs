@@ -33,6 +33,18 @@ impl Plugin for TonesPlugin {
             error!(?e, "initialize failed");
             return;
         }
+        if let Err(e) = host
+            .register_settings_section(json!({
+                "surface_id": SECTION_ID,
+                "title": "PTT Tones",
+                "icon": { "name": "volume-up" },
+                "priority": 110,
+                "tree": {},
+            }))
+            .await
+        {
+            warn!(?e, "register_settings_section failed");
+        }
         match host.config_namespace_get(PLUGIN_ID).await {
             Ok(v) => *self.cfg.lock().await = TonesConfig::from_json(&v),
             Err(e) => warn!(?e, "config_namespace_get failed; using defaults"),

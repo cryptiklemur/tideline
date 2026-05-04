@@ -26,6 +26,18 @@ impl Plugin for NotifPlugin {
             error!(?e, "initialize failed");
             return;
         }
+        if let Err(e) = host
+            .register_settings_section(json!({
+                "surface_id": SECTION_ID,
+                "title": "PTT Notifications",
+                "icon": { "name": "bell" },
+                "priority": 120,
+                "tree": {},
+            }))
+            .await
+        {
+            warn!(?e, "register_settings_section failed");
+        }
         match host.config_namespace_get(PLUGIN_ID).await {
             Ok(v) => *self.cfg.lock().await = NotifConfig::from_json(&v),
             Err(e) => warn!(?e, "config_namespace_get failed; using defaults"),
