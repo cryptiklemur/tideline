@@ -11,7 +11,8 @@
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
     "tauri": "tauri",
     "test": "vitest run --passWithNoTests",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "build:plugins": "cargo build -p tideline-ptt -p tideline-notifications -p tideline-tones -p tideline-wave-xlr -p tideline-effects"
   },
   "license": "MIT",
   "dependencies": {
