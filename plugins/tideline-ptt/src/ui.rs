@@ -11,6 +11,7 @@ pub fn settings_section(cfg: &PluginConfig, capture: CaptureMethod, error: Optio
     };
     let mut children = vec![json!({
         "kind": "heading",
+        "id": "ptt-heading",
         "text": heading_text,
     })];
 
@@ -28,6 +29,7 @@ pub fn settings_section(cfg: &PluginConfig, capture: CaptureMethod, error: Optio
         };
         children.push(json!({
             "kind": "banner",
+            "id": "ptt-banner-error",
             "tone": "warning",
             "text": err,
             "action": action,
@@ -37,12 +39,14 @@ pub fn settings_section(cfg: &PluginConfig, capture: CaptureMethod, error: Optio
     if matches!(capture, CaptureMethod::Evdev) {
         children.push(json!({
             "kind": "binding_capture",
+            "id": "ptt-mode-toggle-binding",
             "label": "Toggle mode",
             "value": cfg.mode_toggle_binding,
             "action": "tideline-ptt:set_mode_toggle_binding",
         }));
         children.push(json!({
             "kind": "binding_capture",
+            "id": "ptt-hold-binding",
             "label": "Hold to transmit",
             "value": cfg.hold_binding,
             "action": "tideline-ptt:set_hold_binding",
@@ -51,6 +55,7 @@ pub fn settings_section(cfg: &PluginConfig, capture: CaptureMethod, error: Optio
 
     children.push(json!({
         "kind": "select",
+        "id": "ptt-input-device",
         "label": "Input device (PulseAudio source)",
         "value": cfg.input_device,
         "options_action": "tideline-ptt:list_sources",
