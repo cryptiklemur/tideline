@@ -141,7 +141,7 @@ impl HostClient {
     pub async fn settings_section_render(&self, section_id: &str, tree: Value) -> Result<(), SdkTransportError> {
         self.transport.call(
             "plugin/settings.section.render",
-            Some(json!({"section_id": section_id, "tree": tree})),
+            Some(json!({"surface_id": section_id, "tree": tree})),
             Duration::from_secs(2),
         ).await.map(|_| ())
     }
