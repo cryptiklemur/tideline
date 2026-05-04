@@ -106,6 +106,17 @@ impl HostClient {
         ).await.map(|_| ())
     }
 
+    /// Ask the host to focus a channel overlay surface (e.g. open the rack iframe
+    /// when the sidebar badge is clicked). Payload typically includes `surface_id`
+    /// and `channel_uuid`.
+    pub async fn ui_channel_overlay_focus(&self, payload: Value) -> Result<(), SdkTransportError> {
+        self.transport.call(
+            "host/ui.channel_overlay.focus",
+            Some(payload),
+            Duration::from_secs(2),
+        ).await.map(|_| ())
+    }
+
     pub async fn settings_section_render(&self, section_id: &str, tree: Value) -> Result<(), SdkTransportError> {
         self.transport.call(
             "plugin/settings.section.render",
