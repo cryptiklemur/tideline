@@ -17,6 +17,7 @@ fn main() {
             "tideline-notifications",
             "tideline-wave-xlr",
             "tideline-ptt",
+            "tideline-effects",
         ] {
             let bin = target_dir.join(id);
             let manifest = workspace_root

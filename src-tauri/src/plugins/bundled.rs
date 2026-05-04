@@ -66,6 +66,20 @@ pub const BUNDLED: &[BundledPlugin] = &[
             "/../plugins/tideline-ptt/tideline-plugin.toml"
         )),
     },
+    BundledPlugin {
+        id: "tideline-effects",
+        exec_name: "tideline-effects",
+        binary: include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../target/",
+            env!("PROFILE_DIR"),
+            "/tideline-effects"
+        )),
+        manifest: include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../plugins/tideline-effects/tideline-plugin.toml"
+        )),
+    },
 ];
 
 #[cfg(not(feature = "bundled-plugins"))]
