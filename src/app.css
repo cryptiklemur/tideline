@@ -2,6 +2,13 @@
 
 @import "tailwindcss";
 
+@source "./";
+@source not "../target";
+@source not "../crates";
+@source not "../plugins";
+@source not "../src-tauri";
+@source not "../node_modules";
+
 @plugin "daisyui" {
     themes: tideline-light --default, tideline-dark --prefersdark;
 }
