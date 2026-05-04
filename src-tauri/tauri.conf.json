@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "com.cryptiklemur.tideline",
   "build": {
-    "beforeDevCommand": "cargo watch -c -w plugins -x 'build -p tideline-ptt -p tideline-notifications -p tideline-tones -p tideline-wave-xlr -p tideline-effects'",
+    "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "npm run build",
     "frontendDist": "../build"
