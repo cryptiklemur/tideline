@@ -32,6 +32,7 @@ impl Plugin for NotifPlugin {
                 "title": "PTT Notifications",
                 "icon": { "name": "bell" },
                 "priority": 120,
+                "parent_surface_id": "tideline-ptt",
                 "tree": {},
             }))
             .await
@@ -44,6 +45,10 @@ impl Plugin for NotifPlugin {
         }
         if let Err(e) = host.event_subscribe(TOPIC_PTT_MODE).await {
             error!(?e, "event_subscribe failed");
+        }
+        let cfg_now = self.cfg.lock().await.clone();
+        if let Err(e) = host.settings_section_render(SECTION_ID, render(&cfg_now)).await {
+            warn!(?e, "initial settings_section_render failed");
         }
         info!(plugin = PLUGIN_ID, "ready");
     }

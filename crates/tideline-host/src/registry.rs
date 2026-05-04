@@ -464,6 +464,31 @@ impl PluginRegistry {
         Ok(())
     }
 
+    /// Update only the `tree` field of an already-registered settings section.
+    /// Called when a plugin pushes a rendered tree via `plugin/settings.section.render`.
+    /// Silently succeeds if the section is not yet registered (push may arrive before registration).
+    pub async fn update_settings_section_tree(
+        &self,
+        plugin_id: &str,
+        surface_id: &str,
+        tree: serde_json::Value,
+    ) -> Result<(), RegistryError> {
+        {
+            let mut map = self.plugin_contribs.write().await;
+            if let Some(entry) = map.get_mut(plugin_id) {
+                if let Some(section) = entry.settings_sections.iter_mut().find(|x| x.surface_id == surface_id) {
+                    section.tree = tree;
+                } else {
+                    return Ok(());
+                }
+            } else {
+                return Ok(());
+            }
+        }
+        self.recompute_and_broadcast().await;
+        Ok(())
+    }
+
     /// Drop all contributions registered by `plugin_id` and rebroadcast the
     /// aggregate. Called when a plugin stops cleanly or its process exits.
     pub async fn evict_plugin_contributions(&self, plugin_id: &str) {

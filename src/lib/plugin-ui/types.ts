@@ -43,6 +43,7 @@ export interface SettingsSectionContribution {
     title: string;
     icon?: UiIconRef;
     priority: number;
+    parent_surface_id?: string;
     tree: UiNode;
 }
 

@@ -135,8 +135,9 @@ let outputCount = $derived(config.channels.filter(c => (c.kind ?? 'output') === 
                     <span class="text-sm">{s.label}</span>
                 </button>
             {/each}
-            {#each pluginUi.contributions.settings_sections.slice().sort((a, b) => b.priority - a.priority || a.plugin_id.localeCompare(b.plugin_id)) as section (section.plugin_id + ':' + section.surface_id)}
+            {#each pluginUi.contributions.settings_sections.slice().filter(s => !s.parent_surface_id).sort((a, b) => b.priority - a.priority || a.plugin_id.localeCompare(b.plugin_id)) as section (section.plugin_id + ':' + section.surface_id)}
                 {@const isActive = active.kind === 'plugin' && active.plugin_id === section.plugin_id && active.surface_id === section.surface_id}
+                {@const children = pluginUi.contributions.settings_sections.filter(s => s.plugin_id === section.plugin_id && s.parent_surface_id === section.surface_id).sort((a, b) => b.priority - a.priority)}
                 <button
                     type="button"
                     class="flex items-center gap-2.5 px-2.5 py-2 rounded-md text-left transition-colors cursor-pointer
@@ -149,6 +150,21 @@ let outputCount = $derived(config.channels.filter(c => (c.kind ?? 'output') === 
                     {/if}
                     <span class="text-sm">{section.title}</span>
                 </button>
+                {#each children as child (child.plugin_id + ':' + child.surface_id)}
+                    {@const childActive = active.kind === 'plugin' && active.plugin_id === child.plugin_id && active.surface_id === child.surface_id}
+                    <button
+                        type="button"
+                        class="flex items-center gap-2.5 pl-7 pr-2.5 py-1.5 rounded-md text-left transition-colors cursor-pointer
+                               {childActive ? 'bg-primary/15 text-primary font-semibold' : 'text-base-content/55 hover:bg-base-content/5 hover:text-base-content'}"
+                        onclick={() => active = { kind: 'plugin', plugin_id: child.plugin_id, surface_id: child.surface_id }}
+                        aria-pressed={childActive}
+                    >
+                        {#if child.icon}
+                            <UiIcon node={{ kind: 'icon', id: 'nav-' + child.surface_id, icon: child.icon, size: 12 }} />
+                        {/if}
+                        <span class="text-xs">{child.title}</span>
+                    </button>
+                {/each}
             {/each}
         </nav>
 

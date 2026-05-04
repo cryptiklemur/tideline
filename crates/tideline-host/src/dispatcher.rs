@@ -142,6 +142,19 @@ pub async fn dispatch(ctx: &HostContext, method: &str, params: Option<Value>)
                 .map_err(|e| RpcError { code: error_codes::INTERNAL_ERROR, message: e, data: None })?;
             Ok(json!({}))
         }
+        "plugin/settings.section.render" => {
+            let p = params.unwrap_or(json!({}));
+            let surface_id = p.get("surface_id").and_then(|v| v.as_str())
+                .ok_or_else(|| RpcError { code: error_codes::INVALID_PARAMS, message: "missing surface_id".into(), data: None })?
+                .to_string();
+            let tree = p.get("tree").cloned().unwrap_or(serde_json::Value::Null);
+            let registry = ctx.registry.upgrade().ok_or_else(|| RpcError {
+                code: error_codes::INTERNAL_ERROR, message: "registry dropped".into(), data: None,
+            })?;
+            registry.update_settings_section_tree(&ctx.plugin_id, &surface_id, tree).await
+                .map_err(|e| RpcError { code: error_codes::INTERNAL_ERROR, message: e.to_string(), data: None })?;
+            Ok(json!({}))
+        }
         "host/ui.iframe.show" | "host/ui.iframe.hide" | "host/ui.iframe.send" => Ok(json!({})),
         "host/ui.channel_overlay.focus" => Ok(json!({})),
         "host/keybind.register" | "host/keybind.unregister" => Ok(json!({})),

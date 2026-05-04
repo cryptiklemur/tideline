@@ -16,6 +16,10 @@ pub struct SettingsSectionContribution {
     pub icon: Option<UiIconRef>,
     #[serde(default)]
     pub priority: i32,
+    /// If set, this section is shown nested under the named surface_id of the
+    /// same plugin rather than as a top-level sidebar entry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_surface_id: Option<String>,
     pub tree: UiNode,
 }
 

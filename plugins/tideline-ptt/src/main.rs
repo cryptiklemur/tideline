@@ -65,6 +65,7 @@ impl Plugin for PttPlugin {
         }
 
         let runtime = self.runtime.clone();
+        let host_for_tree = host.clone();
         tokio::spawn(async move {
             let portal_result = tokio::time::timeout(
                 Duration::from_secs(3),
@@ -86,6 +87,15 @@ impl Plugin for PttPlugin {
                     evdev_listener::start(runtime.clone()).await;
                     runtime.set_capture_method(CaptureMethod::Evdev).await;
                 }
+            }
+            let cm = *runtime.capture_method.lock().await;
+            let cfg = runtime.config.lock().await.clone();
+            let err = runtime.error.lock().await.clone();
+            if let Err(e) = host_for_tree.settings_section_render(
+                SECTION_ID,
+                ui::settings_section(&cfg, cm, err.as_deref()),
+            ).await {
+                warn!(?e, "initial settings_section_render failed");
             }
         });
 

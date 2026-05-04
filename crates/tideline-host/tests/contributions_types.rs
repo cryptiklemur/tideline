@@ -19,6 +19,7 @@ fn settings_section_round_trips() {
         title: "Test".into(),
         icon: None,
         priority: 10,
+        parent_surface_id: None,
         tree: serde_json::json!({"kind": "section", "children": []}),
     };
     let json = serde_json::to_string(&s).unwrap();

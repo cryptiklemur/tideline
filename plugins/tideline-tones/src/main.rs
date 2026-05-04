@@ -39,6 +39,7 @@ impl Plugin for TonesPlugin {
                 "title": "PTT Tones",
                 "icon": { "name": "volume-up" },
                 "priority": 110,
+                "parent_surface_id": "tideline-ptt",
                 "tree": {},
             }))
             .await
@@ -51,6 +52,10 @@ impl Plugin for TonesPlugin {
         }
         if let Err(e) = host.event_subscribe(TOPIC_PTT_STATE).await {
             error!(?e, "event_subscribe failed");
+        }
+        let cfg_now = self.cfg.lock().await.clone();
+        if let Err(e) = host.settings_section_render(SECTION_ID, serde_json::to_value(render(&cfg_now)).unwrap_or(serde_json::Value::Null)).await {
+            warn!(?e, "initial settings_section_render failed");
         }
         info!(plugin = PLUGIN_ID, "ready");
     }
