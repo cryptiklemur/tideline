@@ -149,7 +149,19 @@ pub async fn ensure_cached() -> PluginScanCache {
 }
 
 pub async fn run_first_boot(_state: Arc<EffectsState>) {
-    // Filled in by Task 25.
+    if let Some(c) = load_cache() {
+        if cache_is_fresh(&c) {
+            tracing::info!(count = c.plugins.len(), "effects plugin cache fresh, skipping scan");
+            return;
+        }
+    }
+    tracing::info!("effects plugin cache missing or stale, running first-boot scan");
+    let cache = scan_all().await;
+    if let Err(e) = save_cache(&cache) {
+        tracing::warn!(?e, "failed to save effects plugin cache");
+    } else {
+        tracing::info!(count = cache.plugins.len(), "effects plugin cache written");
+    }
 }
 
 #[cfg(test)]

@@ -59,6 +59,16 @@ impl Plugin for EffectsPlugin {
                 .await;
         }
 
+        for topic in &[
+            "host:pipewire_restarting",
+            "host:pipewire_restarted",
+            "host:channel_removed",
+        ] {
+            if let Err(e) = host.event_subscribe(topic).await {
+                warn!(?e, topic, "event_subscribe failed");
+            }
+        }
+
         let s = self.state.clone();
         tokio::spawn(async move {
             discovery::run_first_boot(s).await;
