@@ -104,7 +104,7 @@ pub async fn handle_overlay_event(
     Ok(json!({}))
 }
 
-fn sidebar_badge_tree(has_fx: bool) -> Value {
+pub(crate) fn sidebar_badge_tree(has_fx: bool) -> Value {
     let tone = if has_fx { "primary" } else { "muted" };
     json!({
         "kind": "row",
@@ -121,7 +121,7 @@ fn sidebar_badge_tree(has_fx: bool) -> Value {
     })
 }
 
-fn detail_iframe_tree() -> Value {
+pub(crate) fn detail_iframe_tree() -> Value {
     json!({
         "kind": "iframe",
         "surface_id": DETAIL_SLOT,
@@ -129,14 +129,14 @@ fn detail_iframe_tree() -> Value {
     })
 }
 
-fn settings_tree() -> Value {
+pub(crate) fn settings_tree() -> Value {
     json!({
         "kind": "section",
         "title": "Effects",
         "children": [{
-            "kind": "text",
-            "tone": "muted",
-            "value": "Plugin discovery + install controls land alongside the iframe rack UI.",
+            "kind": "label",
+            "muted": true,
+            "text": "Plugin discovery + install controls land alongside the iframe rack UI.",
         }],
     })
 }

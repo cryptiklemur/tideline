@@ -167,9 +167,6 @@ onDestroy(() => {
         onkeydown={onRowKeyDown}
         title={out.name}
     >
-        <span class="nav-icon flex items-center justify-center flex-shrink-0">
-            <Icon name="speaker" size={14} />
-        </span>
         <div class="flex flex-col min-w-0 flex-1 gap-1">
             <span class="overflow-hidden text-ellipsis whitespace-nowrap leading-tight">{out.description}</span>
             {#if !out.muted}

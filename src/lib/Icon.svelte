@@ -45,6 +45,7 @@ import Palette from '@lucide/svelte/icons/palette';
 import Info from '@lucide/svelte/icons/info';
 import Cable from '@lucide/svelte/icons/cable';
 import ShieldCheck from '@lucide/svelte/icons/shield-check';
+import WandSparkles from '@lucide/svelte/icons/wand-sparkles';
 
 export const ICONS = {
     headphones: Headphones,
@@ -93,6 +94,8 @@ export const ICONS = {
     info: Info,
     cable: Cable,
     'shield-check': ShieldCheck,
+    fx: WandSparkles,
+    'volume-up': Volume2,
 } as const;
 
 export type IconName = keyof typeof ICONS;

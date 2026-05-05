@@ -20,6 +20,7 @@ required = [
   "config.namespace.write",
   "ui.channel_overlay",
   "ui.iframe",
+  "ui.settings_section",
   "events.publish",
 ]
 optional = [

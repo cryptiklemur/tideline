@@ -49,6 +49,31 @@ impl Plugin for EffectsPlugin {
             return;
         }
 
+        if let Err(e) = host
+            .register_settings_section(serde_json::json!({
+                "surface_id": "effects",
+                "title": "Effects",
+                "icon": { "name": "fx" },
+                "priority": 50,
+                "tree": overlay_render::settings_tree(),
+            }))
+            .await
+        {
+            warn!(?e, "register_settings_section failed");
+        }
+
+        if let Err(e) = host
+            .register_channel_overlay(serde_json::json!({
+                "surface_id": "detail",
+                "placement": "detail",
+                "channel_filter": { "kind": "all" },
+                "tree": overlay_render::detail_iframe_tree(),
+            }))
+            .await
+        {
+            warn!(?e, "register_channel_overlay detail failed");
+        }
+
         if let Err(e) = engine::start(self.state.clone()).await {
             error!(error = %e, "engine start failed");
             let _ = host
