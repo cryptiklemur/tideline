@@ -1,11 +1,18 @@
 use std::path::Path;
 
 #[cfg(feature = "bundled-plugins")]
+pub struct BundledAsset {
+    pub rel_path: &'static str,
+    pub bytes: &'static [u8],
+}
+
+#[cfg(feature = "bundled-plugins")]
 pub struct BundledPlugin {
     pub id: &'static str,
     pub exec_name: &'static str,
     pub binary: &'static [u8],
     pub manifest: &'static str,
+    pub assets: &'static [BundledAsset],
 }
 
 #[cfg(feature = "bundled-plugins")]
@@ -23,6 +30,7 @@ pub const BUNDLED: &[BundledPlugin] = &[
             env!("CARGO_MANIFEST_DIR"),
             "/../plugins/tideline-tones/tideline-plugin.toml"
         )),
+        assets: &[],
     },
     BundledPlugin {
         id: "tideline-notifications",
@@ -37,20 +45,7 @@ pub const BUNDLED: &[BundledPlugin] = &[
             env!("CARGO_MANIFEST_DIR"),
             "/../plugins/tideline-notifications/tideline-plugin.toml"
         )),
-    },
-    BundledPlugin {
-        id: "tideline-wave-xlr",
-        exec_name: "tideline-wave-xlr",
-        binary: include_bytes!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../target/",
-            env!("PROFILE_DIR"),
-            "/tideline-wave-xlr"
-        )),
-        manifest: include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../plugins/tideline-wave-xlr/tideline-plugin.toml"
-        )),
+        assets: &[],
     },
     BundledPlugin {
         id: "tideline-ptt",
@@ -65,6 +60,7 @@ pub const BUNDLED: &[BundledPlugin] = &[
             env!("CARGO_MANIFEST_DIR"),
             "/../plugins/tideline-ptt/tideline-plugin.toml"
         )),
+        assets: &[],
     },
     BundledPlugin {
         id: "tideline-effects",
@@ -79,6 +75,29 @@ pub const BUNDLED: &[BundledPlugin] = &[
             env!("CARGO_MANIFEST_DIR"),
             "/../plugins/tideline-effects/tideline-plugin.toml"
         )),
+        assets: &[
+            BundledAsset {
+                rel_path: "webviews/detail/index.html",
+                bytes: include_bytes!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../plugins/tideline-effects/webviews/detail/index.html"
+                )),
+            },
+            BundledAsset {
+                rel_path: "webviews/detail/main.js",
+                bytes: include_bytes!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../plugins/tideline-effects/webviews/detail/main.js"
+                )),
+            },
+            BundledAsset {
+                rel_path: "webviews/detail/style.css",
+                bytes: include_bytes!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../plugins/tideline-effects/webviews/detail/style.css"
+                )),
+            },
+        ],
     },
 ];
 
@@ -111,6 +130,20 @@ pub fn extract_to(install_root: &Path) -> std::io::Result<usize> {
             extracted += 1;
         } else if !manifest_path.exists() {
             std::fs::write(&manifest_path, plugin.manifest)?;
+        }
+
+        for asset in plugin.assets {
+            let asset_path = dir.join(asset.rel_path);
+            if let Some(parent) = asset_path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            let asset_needs_write = match std::fs::read(&asset_path) {
+                Ok(existing) => existing != asset.bytes,
+                Err(_) => true,
+            };
+            if asset_needs_write {
+                std::fs::write(&asset_path, asset.bytes)?;
+            }
         }
     }
     Ok(extracted)

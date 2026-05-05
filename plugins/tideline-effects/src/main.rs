@@ -62,10 +62,16 @@ impl Plugin for EffectsPlugin {
             warn!(?e, "register_settings_section failed");
         }
 
-        let webview_path = format!(
-            "{}/webviews/detail/index.html",
-            env!("CARGO_MANIFEST_DIR")
-        );
+        let webview_path = std::env::current_dir()
+            .ok()
+            .map(|p| p.join("webviews/detail/index.html"))
+            .filter(|p| p.exists())
+            .unwrap_or_else(|| {
+                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("webviews/detail/index.html")
+            })
+            .to_string_lossy()
+            .into_owned();
         if let Err(e) = host
             .register_iframe_surface(serde_json::json!({
                 "surface_id": overlay_render::RACK_IFRAME_SLOT,
