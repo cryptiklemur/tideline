@@ -35,9 +35,5 @@ publishes_topics = [
 ]
 
 [[contributes.channel_overlays]]
-slot = "sidebar_badge"
-icon = "fx"
-
-[[contributes.channel_overlays]]
-slot = "detail"
+slot = "channel_card"
 icon = "fx"

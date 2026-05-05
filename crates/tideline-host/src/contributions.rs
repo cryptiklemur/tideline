@@ -51,6 +51,7 @@ pub enum OverlayPlacement {
     Detail,
     SidebarBadge,
     HeaderChip,
+    ChannelCard,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -60,6 +61,24 @@ pub struct ChannelOverlayContribution {
     pub placement: OverlayPlacement,
     pub channel_filter: ChannelFilter,
     pub tree: UiNode,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum InputFilter {
+    All,
+    PhysicalOnly,
+    SourceNames { names: Vec<String> },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InputOverlayContribution {
+    pub plugin_id: String,
+    pub surface_id: String,
+    pub input_filter: InputFilter,
+    pub tree: UiNode,
+    #[serde(default)]
+    pub values_by_source: std::collections::HashMap<String, std::collections::HashMap<String, serde_json::Value>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -105,4 +124,6 @@ pub struct Contributions {
     pub keybind_actions: Vec<KeybindActionContribution>,
     #[serde(default)]
     pub iframe_surfaces: Vec<IframeSurface>,
+    #[serde(default)]
+    pub input_overlays: Vec<InputOverlayContribution>,
 }

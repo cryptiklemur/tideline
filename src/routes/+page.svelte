@@ -18,6 +18,7 @@ import Toaster from '$lib/Toaster.svelte';
 import { toaster } from '$lib/toaster.svelte';
 import ChannelOverlay from '$lib/plugin-ui/ChannelOverlay.svelte';
 import PermissionsDialog from '$lib/plugin-ui/PermissionsDialog.svelte';
+import PluginRackDialog from '$lib/plugin-ui/PluginRackDialog.svelte';
 import { pluginUi } from '$lib/plugin-ui/pluginUi.svelte';
 import type { AppConfig, AudioBackendStatus, ChannelConfig, ChannelKind, ChannelVolumes, KeybindAction, Mix, SinkInfo } from '$lib/types';
 
@@ -79,7 +80,7 @@ let activeMix = $derived(
         : null,
 );
 
-function overlaysFor(channelId: string, placement: 'detail' | 'sidebar_badge' | 'header_chip') {
+function overlaysFor(channelId: string, placement: 'detail' | 'sidebar_badge' | 'header_chip' | 'channel_card') {
     return pluginUi.contributions.channel_overlays.filter((o) => {
         if (o.placement !== placement) return false;
         if (o.channel_filter.kind === 'all') return true;
@@ -121,6 +122,7 @@ let addChannelOpen = $state(false);
 let addMixOpen = $state(false);
 let settingsForIndex = $state<number | null>(null);
 let settingsForChannel = $derived(settingsForIndex !== null ? config.channels[settingsForIndex] ?? null : null);
+let rackOpen = $state<{ pluginId: string; channelUuid: string } | null>(null);
 
 onMount(() => {
     void pluginUi.init();
@@ -565,6 +567,7 @@ onDestroy(() => pluginUi.teardown());
                             {#each matrixChannels as { ch, configIndex } (ch.name)}
                                 <MatrixRow
                                     name={ch.name}
+                                    channelUuid={ch.uuid}
                                     kind={ch.kind ?? 'output'}
                                     icon={ch.icon ?? ''}
                                     mixes={config.mixes}
@@ -575,6 +578,9 @@ onDestroy(() => pluginUi.teardown());
                                     {appIcons}
                                     initialVolumes={channelVolumes[ch.name]}
                                     onSettings={() => settingsForIndex = configIndex}
+                                    channelCardOverlays={overlaysFor(ch.uuid, 'channel_card')}
+                                    onOverlayEmit={(pluginId, ev) => pluginUi.emit(pluginId, ev)}
+                                    onOpenRack={(pluginId, channelUuid) => rackOpen = { pluginId, channelUuid }}
                                     draggable={true}
                                     isDragging={dragIndex === configIndex}
                                     isDragOver={dragOverIndex === configIndex && dragIndex !== configIndex}
@@ -728,5 +734,13 @@ onDestroy(() => pluginUi.teardown());
     <PermissionsDialog
         request={pluginUi.permissionPrompt}
         onResolve={(grant) => pluginUi.respondPermission(grant)}
+    />
+{/if}
+
+{#if rackOpen}
+    <PluginRackDialog
+        pluginId={rackOpen.pluginId}
+        channelUuid={rackOpen.channelUuid}
+        onClose={() => rackOpen = null}
     />
 {/if}

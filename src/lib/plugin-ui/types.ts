@@ -31,10 +31,14 @@ export type UiEventValue =
     | { type: 'order'; value: string[] }
     | { type: 'click' };
 
+export type UiEventContext =
+    | { kind: 'input'; source_name: string };
+
 export interface UiEvent {
     surface_id: string;
     node_id: string;
     value: UiEventValue;
+    context?: UiEventContext;
 }
 
 export interface SettingsSectionContribution {
@@ -60,7 +64,7 @@ export interface StatusPillContribution {
 export interface ChannelOverlayContribution {
     plugin_id: string;
     surface_id: string;
-    placement: 'detail' | 'sidebar_badge' | 'header_chip';
+    placement: 'detail' | 'sidebar_badge' | 'header_chip' | 'channel_card';
     channel_filter: { kind: 'all' } | { kind: 'channel_ids'; ids: string[] };
     tree: UiNode;
 }
@@ -87,6 +91,19 @@ export interface IframeSurface {
     initial_data?: unknown;
 }
 
+export type InputFilter =
+    | { kind: 'all' }
+    | { kind: 'physical_only' }
+    | { kind: 'source_names'; names: string[] };
+
+export interface InputOverlayContribution {
+    plugin_id: string;
+    surface_id: string;
+    input_filter: InputFilter;
+    tree: UiNode;
+    values_by_source?: Record<string, Record<string, unknown>>;
+}
+
 export interface Contributions {
     settings_sections: SettingsSectionContribution[];
     status_pills: StatusPillContribution[];
@@ -94,6 +111,7 @@ export interface Contributions {
     tray_items: TrayItemContribution[];
     keybind_actions: KeybindActionContribution[];
     iframe_surfaces: IframeSurface[];
+    input_overlays: InputOverlayContribution[];
 }
 
 export interface PermissionRequest {

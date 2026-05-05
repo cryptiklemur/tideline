@@ -62,16 +62,30 @@ impl Plugin for EffectsPlugin {
             warn!(?e, "register_settings_section failed");
         }
 
+        let webview_path = format!(
+            "{}/webviews/detail/index.html",
+            env!("CARGO_MANIFEST_DIR")
+        );
         if let Err(e) = host
-            .register_channel_overlay(serde_json::json!({
-                "surface_id": "detail",
-                "placement": "detail",
-                "channel_filter": { "kind": "all" },
-                "tree": overlay_render::detail_iframe_tree(),
+            .register_iframe_surface(serde_json::json!({
+                "surface_id": overlay_render::RACK_IFRAME_SLOT,
+                "entry_path": webview_path,
             }))
             .await
         {
-            warn!(?e, "register_channel_overlay detail failed");
+            warn!(?e, "register_iframe_surface rack failed");
+        }
+
+        if let Err(e) = host
+            .register_channel_overlay(serde_json::json!({
+                "surface_id": "channel_card",
+                "placement": "channel_card",
+                "channel_filter": { "kind": "all" },
+                "tree": overlay_render::channel_card_tree(false),
+            }))
+            .await
+        {
+            warn!(?e, "register_channel_overlay channel_card failed");
         }
 
         if let Err(e) = engine::start(self.state.clone()).await {

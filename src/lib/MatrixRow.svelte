@@ -4,10 +4,13 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { onMount, onDestroy } from 'svelte';
 import Icon from './Icon.svelte';
 import ChannelIcon from './ChannelIcon.svelte';
+import ChannelOverlay from './plugin-ui/ChannelOverlay.svelte';
+import type { ChannelOverlayContribution, UiEvent } from './plugin-ui/types';
 import type { ChannelKind, ChannelVolumes, Mix, SinkInput } from './types';
 
 interface Props {
     name: string;
+    channelUuid?: string;
     kind: ChannelKind;
     icon?: string;
     mixes: Mix[];
@@ -18,6 +21,9 @@ interface Props {
     appIcons?: Record<string, string | null>;
     initialVolumes?: ChannelVolumes;
     onSettings?: () => void;
+    channelCardOverlays?: ChannelOverlayContribution[];
+    onOverlayEmit?: (pluginId: string, event: UiEvent) => void;
+    onOpenRack?: (pluginId: string, channelUuid: string) => void;
     draggable?: boolean;
     isDragging?: boolean;
     isDragOver?: boolean;
@@ -29,10 +35,13 @@ interface Props {
 }
 
 let {
-    name, kind, icon = '', mixes, mixEnabled, meterSource, sourceName,
+    name, channelUuid = '', kind, icon = '', mixes, mixEnabled, meterSource, sourceName,
     programs = [], appIcons = {},
     initialVolumes,
     onSettings,
+    channelCardOverlays = [],
+    onOverlayEmit,
+    onOpenRack,
     draggable = false,
     isDragging = false,
     isDragOver = false,
@@ -83,6 +92,9 @@ let displayLevel = $state(0);
 let peakHold = $state(0);
 let lastPeakAt = 0;
 let levelUnlisten: UnlistenFn | null = null;
+let muteUnlisten: UnlistenFn | null = null;
+let volUnlisten: UnlistenFn | null = null;
+let sinkInputMuteUnlisten: UnlistenFn | null = null;
 let rafId: number | null = null;
 
 onMount(async () => {
@@ -92,6 +104,26 @@ onMount(async () => {
     } else {
         await refresh();
     }
+    if (isInput && sourceName) {
+        muteUnlisten = await listen<{ source_name: string; muted: boolean }>(
+            'tideline:source_mute_changed',
+            e => { if (e.payload.source_name === sourceName) masterMuted = e.payload.muted; },
+        );
+        volUnlisten = await listen<{ source_name: string; volume_pct: number }>(
+            'tideline:source_volume_changed',
+            e => { if (e.payload.source_name === sourceName) masterVol = e.payload.volume_pct; },
+        );
+    }
+    sinkInputMuteUnlisten = await listen<{ index: number; muted: boolean }>(
+        'tideline:sink_input_mute_changed',
+        e => {
+            for (const mixId of Object.keys(mixIndexes)) {
+                if (mixIndexes[mixId].includes(e.payload.index)) {
+                    mixMutes = { ...mixMutes, [mixId]: e.payload.muted };
+                }
+            }
+        },
+    );
     if (meterSource) {
         const eventName = `level:${meterSource.replace(/\./g, '_')}`;
         levelUnlisten = await listen<{ peak: number; rms: number }>(eventName, e => {
@@ -119,6 +151,9 @@ onMount(async () => {
 
 onDestroy(() => {
     if (levelUnlisten) levelUnlisten();
+    muteUnlisten?.();
+    volUnlisten?.();
+    sinkInputMuteUnlisten?.();
     if (rafId !== null) cancelAnimationFrame(rafId);
 });
 
@@ -343,6 +378,19 @@ function segmentColor(i: number): string {
         <span class="text-sm font-medium text-base-content leading-tight break-words line-clamp-2 min-w-0" title={name}>{name}</span>
 
         <div class="flex items-center gap-2 flex-shrink-0">
+            {#each channelCardOverlays as o (o.plugin_id + ':' + o.surface_id)}
+                <div
+                    class="flex items-center"
+                    role="button"
+                    tabindex="-1"
+                    onclickcapture={(e) => {
+                        e.stopPropagation();
+                        if (channelUuid) onOpenRack?.(o.plugin_id, channelUuid);
+                    }}
+                >
+                    <ChannelOverlay overlay={o} emit={(ev) => onOverlayEmit?.(o.plugin_id, ev)} />
+                </div>
+            {/each}
             <button
                 type="button"
                 class="w-6 h-6 flex-shrink-0 flex items-center justify-center bg-transparent border-none rounded p-0 cursor-pointer transition-colors hover:text-base-content

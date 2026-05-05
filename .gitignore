@@ -27,3 +27,7 @@ yarn-error.log*
 .idea
 
 plugins/*/bin/
+
+# Cargo build artifacts (workspace + per-crate)
+/target/
+**/target/
