@@ -27,8 +27,51 @@ const APP_TITLE: &str = "Tideline - Dev";
 #[cfg(not(debug_assertions))]
 const APP_TITLE: &str = "Tideline";
 
-const MIX_ENABLED_FILE: &str = "/tmp/tideline-mix-enabled.json";
-const VOLUMES_FILE: &str = "/tmp/tideline-volumes.json";
+const LEGACY_MIX_ENABLED_FILE: &str = "/tmp/tideline-mix-enabled.json";
+const LEGACY_VOLUMES_FILE: &str = "/tmp/tideline-volumes.json";
+
+/// Persistent location for per-channel mix mute / master mute / volume
+/// state. Was previously in `/tmp` which the OS clears on reboot — that
+/// caused mute toggles to silently revert on every reboot. Lives next
+/// to the main config so backups capture it together.
+fn volumes_path() -> std::path::PathBuf {
+    tideline_core::config_io::home_dir().join(".config/tideline/volumes.json")
+}
+
+/// Persistent location for the per-mix on/off toggle map.
+fn mix_enabled_path() -> std::path::PathBuf {
+    tideline_core::config_io::home_dir().join(".config/tideline/mix-enabled.json")
+}
+
+/// One-shot migration: if the new config-dir file is missing but the
+/// legacy `/tmp` file exists, move the legacy file into place. Skips
+/// on read errors so a corrupted legacy file doesn't poison the new
+/// location.
+fn migrate_legacy_state_file(new_path: &std::path::Path, legacy_path: &str) {
+    if new_path.exists() {
+        return;
+    }
+    let legacy = std::path::Path::new(legacy_path);
+    if !legacy.exists() {
+        return;
+    }
+    if let Some(parent) = new_path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    if let Err(e) = fs::rename(legacy, new_path) {
+        eprintln!(
+            "[migrate] failed to move {} to {}: {e}",
+            legacy_path,
+            new_path.display()
+        );
+    } else {
+        eprintln!(
+            "[migrate] moved {} to {}",
+            legacy_path,
+            new_path.display()
+        );
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SinkInput {
@@ -531,7 +574,9 @@ impl Default for ChannelVolumes {
 }
 
 fn read_all_volumes() -> HashMap<String, ChannelVolumes> {
-    fs::read_to_string(VOLUMES_FILE)
+    let path = volumes_path();
+    migrate_legacy_state_file(&path, LEGACY_VOLUMES_FILE);
+    fs::read_to_string(&path)
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default()
@@ -665,7 +710,11 @@ fn pw_load_loopback(inline_args: &str) -> bool {
 /// emit for that (channel, mix, sink_idx) triple. `capture_target` is
 /// either the channel's fx node (when an effects chain is live) or its
 /// raw source (physical_source for PhysicalInput, channel sink for
-/// Output) — the caller picks the right one.
+/// Output) — the caller picks the right one. When capture_target is
+/// the fx_node JACK client we add `node.autoconnect = false` to match
+/// the conf-emitted version; pipewire can't autoconnect to JACK clients
+/// (media.class=null) and a true autoconnect leaves the capture port
+/// dangling, so wire_fx_links has to explicitly pw-link it afterward.
 fn build_post_loopback_args(
     channel: &tideline_core::model::ChannelCfg,
     mix: &tideline_core::model::Mix,
@@ -676,8 +725,13 @@ fn build_post_loopback_args(
     let s = slug(&channel.name);
     let cap_name = format!("capture.{}-{}-{}", s, mix.id, sink_idx);
     let pb_name = format!("playback.{}-{}-{}", s, mix.id, sink_idx);
+    let capture_autoconnect = if capture_target.starts_with("tideline-fx-") {
+        " node.autoconnect = false stream.dont-remix = true"
+    } else {
+        " stream.dont-remix = true"
+    };
     format!(
-        "{{ capture.props = {{ node.name = \"{cap_name}\" target.object = \"{capture_target}\" audio.position = \"FL,FR\" stream.dont-remix = true }} playback.props = {{ node.name = \"{pb_name}\" target.object = \"{sink_target}\" audio.position = \"FL,FR\" }} }}"
+        "{{ capture.props = {{ node.name = \"{cap_name}\" target.object = \"{capture_target}\" audio.position = \"FL,FR\"{capture_autoconnect} }} playback.props = {{ node.name = \"{pb_name}\" target.object = \"{sink_target}\" audio.position = \"FL,FR\" }} }}"
     )
 }
 
@@ -783,8 +837,14 @@ fn apply_mute_via_pw_cli(
 }
 
 fn write_all_volumes(map: &HashMap<String, ChannelVolumes>) {
+    let path = volumes_path();
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
     if let Ok(s) = serde_json::to_string_pretty(map) {
-        let _ = fs::write(VOLUMES_FILE, s);
+        if let Err(e) = fs::write(&path, s) {
+            eprintln!("[volumes] failed to write {}: {e}", path.display());
+        }
     }
 }
 
@@ -905,7 +965,10 @@ fn set_channel_master_mute(
     apply_mute_via_pw_cli(&cfg, &channel, None, |mid| {
         muted || mix_muted_snap.get(mid).copied().unwrap_or(false)
     });
-    // Background conf rewrite so next pipewire restart preserves state.
+    // Background conf rewrite so next pipewire restart preserves state,
+    // plus a wire_fx_links pass for any post-loopbacks just (re)loaded
+    // by the pw-cli path that target the fx_node — those carry
+    // node.autoconnect=false and need an explicit pw-link.
     let cfg_for_conf = cfg.clone();
     let registry_opt = app
         .try_state::<Arc<tideline_host::PluginRegistry>>()
@@ -915,6 +978,7 @@ fn set_channel_master_mute(
             if let Err(e) = write_pipewire_conf_only(&cfg_for_conf, &registry).await {
                 eprintln!("[pw-mute] conf rewrite failed: {e}");
             }
+            wire_fx_links(&cfg_for_conf).await;
         });
     }
     apply_channel_volumes(&app, &slug(&channel), &snap, &mix_ids);
@@ -944,7 +1008,10 @@ fn set_channel_mix_mute(app: AppHandle, channel: String, mix_id: String, muted: 
     });
     // Background: rewrite the pipewire conf so next pipewire restart
     // starts in the correct state. NO restart triggered — the running
-    // graph already matches via the pw-cli calls above.
+    // graph already matches via the pw-cli calls above. Also re-runs
+    // wire_fx_links so any unmuted-just-now post-loopback targeting
+    // fx_node gets pw-linked (the runtime-loaded version has
+    // node.autoconnect=false to match the conf-emitted version).
     let cfg_for_conf = cfg.clone();
     let registry_opt = app
         .try_state::<Arc<tideline_host::PluginRegistry>>()
@@ -954,6 +1021,7 @@ fn set_channel_mix_mute(app: AppHandle, channel: String, mix_id: String, muted: 
             if let Err(e) = write_pipewire_conf_only(&cfg_for_conf, &registry).await {
                 eprintln!("[pw-mute] conf rewrite failed: {e}");
             }
+            wire_fx_links(&cfg_for_conf).await;
         });
     }
     // UI-facing event so strip mute indicators update immediately.
@@ -963,15 +1031,23 @@ fn set_channel_mix_mute(app: AppHandle, channel: String, mix_id: String, muted: 
 }
 
 fn read_mix_enabled() -> HashMap<String, bool> {
-    fs::read_to_string(MIX_ENABLED_FILE)
+    let path = mix_enabled_path();
+    migrate_legacy_state_file(&path, LEGACY_MIX_ENABLED_FILE);
+    fs::read_to_string(&path)
         .ok()
         .and_then(|s| serde_json::from_str::<HashMap<String, bool>>(&s).ok())
         .unwrap_or_default()
 }
 
 fn write_mix_enabled(map: &HashMap<String, bool>) {
+    let path = mix_enabled_path();
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
     if let Ok(s) = serde_json::to_string(map) {
-        let _ = fs::write(MIX_ENABLED_FILE, s);
+        if let Err(e) = fs::write(&path, s) {
+            eprintln!("[mix-enabled] failed to write {}: {e}", path.display());
+        }
     }
 }
 
@@ -1249,13 +1325,20 @@ pub async fn wire_fx_links(cfg: &AppConfig) {
     }
     eprintln!("[fx-link] wiring {} pw-link pairs", pairs.len());
 
+    // 30 attempts × 400ms ≈ 12s of retry budget. The previous 10×300ms
+    // (3s) would expire before tideline-effects finished re-creating
+    // its per-channel JACK clients on a slow boot, leaving the
+    // post-loopback / fx-virtual pairs un-linked — observable as Discord
+    // hearing silence from a virtual mic source whose loopback ran but
+    // was never linked to fx_node:out.
     let mut remaining = pairs;
-    for attempt in 0..10 {
+    let total = remaining.len();
+    for attempt in 0..30 {
         if remaining.is_empty() {
             break;
         }
         if attempt > 0 {
-            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(400)).await;
         }
         let mut next = Vec::new();
         for (out, inp) in remaining.drain(..) {
@@ -1272,6 +1355,12 @@ pub async fn wire_fx_links(cfg: &AppConfig) {
                 Err(_) => next.push((out, inp)),
             }
         }
+        if next.len() != remaining.len() && !next.is_empty() {
+            eprintln!(
+                "[fx-link] attempt {attempt}: {} pending of {total}",
+                next.len()
+            );
+        }
         remaining = next;
     }
     if !remaining.is_empty() {
@@ -1279,7 +1368,7 @@ pub async fn wire_fx_links(cfg: &AppConfig) {
             eprintln!("[fx-link] gave up: {out} -> {inp}");
         }
     } else {
-        eprintln!("[fx-link] all pairs linked");
+        eprintln!("[fx-link] all {total} pairs linked");
     }
 }
 
