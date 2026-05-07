@@ -120,7 +120,27 @@ pub async fn dispatch(ctx: &HostContext, method: &str, params: Option<Value>)
         "host/channel.subscribe_meters" => Ok(json!({})),
         "host/channel.create" => Ok(json!({"id": format!("ch-{}", uuid::Uuid::new_v4())})),
         "host/channel.update" => Ok(json!({})),
-        "host/channel.attach_data" => Ok(json!({})),
+        "host/channel.attach_data" => {
+            let p = params.unwrap_or(json!({}));
+            let channel_uuid: uuid::Uuid = p.get("channel_uuid")
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.parse().ok())
+                .ok_or_else(|| RpcError {
+                    code: error_codes::INVALID_PARAMS,
+                    message: "channel.attach_data: missing/invalid channel_uuid".into(),
+                    data: None,
+                })?;
+            let data = p.get("data").cloned().unwrap_or(json!(null));
+            ctx.backend
+                .attach_channel_data(&ctx.plugin_id, channel_uuid, data)
+                .await
+                .map_err(|e| RpcError {
+                    code: error_codes::INTERNAL_ERROR,
+                    message: e,
+                    data: None,
+                })?;
+            Ok(json!({}))
+        }
         "host/mix.attach_data" => Ok(json!({})),
         "host/levels.read" => Ok(json!({"channels": []})),
         "host/audio.play" => Ok(json!({})),
@@ -132,7 +152,11 @@ pub async fn dispatch(ctx: &HostContext, method: &str, params: Option<Value>)
                 .map_err(|e| RpcError { code: error_codes::INTERNAL_ERROR, message: e, data: None })?;
             Ok(json!({}))
         }
-        "host/sources.list" => Ok(json!({"sources": []})),
+        "host/sources.list" => {
+            let sources = ctx.backend.list_input_sources().await
+                .map_err(|e| RpcError { code: error_codes::INTERNAL_ERROR, message: e, data: None })?;
+            Ok(json!({"sources": sources}))
+        }
         "host/audio.position" => Ok(json!({})),
         "host/notify" | "host/notify.send" => {
             let p = params.unwrap_or(json!({}));
@@ -143,6 +167,7 @@ pub async fn dispatch(ctx: &HostContext, method: &str, params: Option<Value>)
             Ok(json!({}))
         }
         "plugin/settings.section.render" => {
+            tracing::info!("dispatcher: plugin/settings.section.render called, params={:?}", params);
             let p = params.unwrap_or(json!({}));
             let surface_id = p.get("surface_id").and_then(|v| v.as_str())
                 .ok_or_else(|| RpcError { code: error_codes::INVALID_PARAMS, message: "missing surface_id".into(), data: None })?
@@ -194,9 +219,49 @@ pub async fn dispatch(ctx: &HostContext, method: &str, params: Option<Value>)
         "host/contributions.unregister_keybind_action" => {
             unregister_contrib(ctx, ContribKind::KeybindAction, params, "action_id").await
         }
+        "host/contributions.register_input_overlay" => {
+            register_contrib(ctx, ContribKind::InputOverlay, params).await
+        }
+        "host/contributions.unregister_input_overlay" => {
+            unregister_contrib(ctx, ContribKind::InputOverlay, params, "surface_id").await
+        }
         "host/pipewire.contribute" => Ok(json!({})),
-        "host/config.namespace.get" => Ok(json!({})),
-        "host/config.namespace.set" => Ok(json!({})),
+        "host/config.namespace.get" => {
+            let p = params.unwrap_or(json!({}));
+            let namespace = p
+                .get("namespace")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let value = ctx
+                .backend
+                .config_namespace_get(&namespace)
+                .await
+                .map_err(|e| RpcError {
+                    code: error_codes::INTERNAL_ERROR,
+                    message: e,
+                    data: None,
+                })?;
+            Ok(value)
+        }
+        "host/config.namespace.set" => {
+            let p = params.unwrap_or(json!({}));
+            let namespace = p
+                .get("namespace")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let value = p.get("value").cloned().unwrap_or(json!(null));
+            ctx.backend
+                .config_namespace_set(&namespace, value)
+                .await
+                .map_err(|e| RpcError {
+                    code: error_codes::INTERNAL_ERROR,
+                    message: e,
+                    data: None,
+                })?;
+            Ok(json!({}))
+        }
         "host/config.read" => Ok(json!({})),
         "host/config.write" => Ok(json!({})),
         "host/fs.read" | "host/fs.write" => Ok(json!({})),
@@ -270,6 +335,10 @@ mod tests {
                 Ok(())
             }
             async fn notify(&self, _t: &str, _b: &str) -> Result<(), String> { Ok(()) }
+            async fn list_input_sources(&self) -> Result<Vec<crate::backend::AudioSource>, String> { Ok(Vec::new()) }
+            async fn config_namespace_get(&self, _n: &str) -> Result<serde_json::Value, String> { Ok(serde_json::Value::Null) }
+            async fn config_namespace_set(&self, _n: &str, _v: serde_json::Value) -> Result<(), String> { Ok(()) }
+            async fn attach_channel_data(&self, _n: &str, _c: uuid::Uuid, _v: serde_json::Value) -> Result<(), String> { Ok(()) }
         }
 
         let backend = Arc::new(RecordingBackend { calls: Mutex::new(Vec::new()) });
@@ -301,6 +370,10 @@ mod tests {
                 self.calls.lock().unwrap().push((title.to_string(), body.to_string()));
                 Ok(())
             }
+            async fn list_input_sources(&self) -> Result<Vec<crate::backend::AudioSource>, String> { Ok(Vec::new()) }
+            async fn config_namespace_get(&self, _n: &str) -> Result<serde_json::Value, String> { Ok(serde_json::Value::Null) }
+            async fn config_namespace_set(&self, _n: &str, _v: serde_json::Value) -> Result<(), String> { Ok(()) }
+            async fn attach_channel_data(&self, _n: &str, _c: uuid::Uuid, _v: serde_json::Value) -> Result<(), String> { Ok(()) }
         }
 
         let backend = Arc::new(RecordingBackend { calls: Mutex::new(Vec::new()) });
@@ -378,7 +451,7 @@ mod tests {
         let reg = PluginRegistry::new_for_test();
         let ctx = ctx_with_registry(&reg, [
             UiSettingsSection, UiStatusPill, UiChannelOverlay,
-            UiIframe, TrayContribute, KeybindRegister,
+            UiIframe, TrayContribute, KeybindRegister, UiInputOverlay,
         ]);
         dispatch(&ctx, "host/contributions.register_settings_section",
             Some(json!({"surface_id": "s", "title": "T", "tree": {}}))).await.unwrap();
@@ -397,6 +470,12 @@ mod tests {
             Some(json!({"item_id": "t", "label": "Q"}))).await.unwrap();
         dispatch(&ctx, "host/contributions.register_keybind_action",
             Some(json!({"action_id": "a", "label": "X"}))).await.unwrap();
+        dispatch(&ctx, "host/contributions.register_input_overlay",
+            Some(json!({
+                "surface_id": "io",
+                "input_filter": {"kind": "all"},
+                "tree": {}
+            }))).await.unwrap();
         let snap = reg.contributions().await;
         assert_eq!(snap.settings_sections.len(), 1);
         assert_eq!(snap.status_pills.len(), 1);
@@ -404,5 +483,6 @@ mod tests {
         assert_eq!(snap.iframe_surfaces.len(), 1);
         assert_eq!(snap.tray_items.len(), 1);
         assert_eq!(snap.keybind_actions.len(), 1);
+        assert_eq!(snap.input_overlays.len(), 1);
     }
 }

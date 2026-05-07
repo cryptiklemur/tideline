@@ -16,7 +16,6 @@ path = "src/lib.rs"
 [dependencies]
 tideline-sdk = { path = "../../crates/tideline-sdk" }
 tideline-core = { path = "../../crates/tideline-core" }
-carla-sys = { path = "../../crates/carla-sys" }
 tokio = { version = "1", features = ["full"] }
 async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
@@ -32,6 +31,17 @@ dirs = "5"
 once_cell = "1"
 which = "6"
 tempfile = "3"
+jack = "0.13"
+livi = "0.7"
+lv2_raw = "0.2"
+lilv-sys = "0.2"
+xcb = "1"
+arc-swap = "1"
+parking_lot = "0.12"
+
+[build-dependencies]
+bindgen = "0.71"
+pkg-config = "0.3"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full", "test-util"] }

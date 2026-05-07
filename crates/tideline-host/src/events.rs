@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use serde_json::Value;
 use thiserror::Error;
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::{broadcast, Mutex, mpsc};
 
 const RATE_WINDOW: Duration = Duration::from_secs(1);
 const RATE_MAX_EVENTS: usize = 200;
@@ -37,9 +37,22 @@ pub struct EventBusInner {
     inboxes: HashMap<String, PluginInbox>,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct EventBus {
     inner: Arc<Mutex<EventBusInner>>,
+    broadcast_tx: broadcast::Sender<Event>,
+    latest_by_topic: Arc<Mutex<HashMap<String, Event>>>,
+}
+
+impl Default for EventBus {
+    fn default() -> Self {
+        let (broadcast_tx, _) = broadcast::channel(256);
+        Self {
+            inner: Arc::new(Mutex::new(EventBusInner::default())),
+            broadcast_tx,
+            latest_by_topic: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
 }
 
 impl EventBus {
@@ -119,7 +132,30 @@ impl EventBus {
         inner.inboxes.get(plugin_id).map(|i| i.drops).unwrap_or(0)
     }
 
+    pub fn subscribe_broadcast(&self) -> broadcast::Receiver<Event> {
+        self.broadcast_tx.subscribe()
+    }
+
+    /// Re-broadcast the latest known event for every topic that has fired at
+    /// least once. Used to resync newly-mounted frontend listeners that may
+    /// have missed the original publish (e.g. a Tauri webview reload after the
+    /// plugin emitted state on boot).
+    pub async fn replay_latest_to_broadcast(&self) {
+        let snapshot: Vec<Event> = {
+            let latest = self.latest_by_topic.lock().await;
+            latest.values().cloned().collect()
+        };
+        for event in snapshot {
+            let _ = self.broadcast_tx.send(event);
+        }
+    }
+
     async fn fanout(&self, event: Event) {
+        {
+            let mut latest = self.latest_by_topic.lock().await;
+            latest.insert(event.topic.clone(), event.clone());
+        }
+        let _ = self.broadcast_tx.send(event.clone());
         let mut inner = self.inner.lock().await;
         let now = Instant::now();
         let topic = event.topic.clone();

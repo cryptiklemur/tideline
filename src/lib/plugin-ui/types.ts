@@ -3,14 +3,14 @@ import type { Binding } from '$lib/types';
 export type UiIconRef = { name: string };
 
 export type UiNode =
-    | { kind: 'section'; id: string; title?: string; subtitle?: string; children: UiNode[] }
-    | { kind: 'row'; id: string; gap?: number; align?: 'start' | 'center' | 'end'; children: UiNode[] }
+    | { kind: 'section'; id: string; title?: string; subtitle?: string; variant?: 'card'; gap?: number; children: UiNode[] }
+    | { kind: 'row'; id: string; gap?: number; align?: 'start' | 'center' | 'end'; variant?: 'card'; muted?: boolean; pad?: number; children: UiNode[] }
     | { kind: 'col'; id: string; gap?: number; children: UiNode[] }
-    | { kind: 'label'; id: string; text: string; muted?: boolean }
+    | { kind: 'label'; id: string; text: string; muted?: boolean; tooltip?: string; tooltip_placement?: 'top' | 'bottom' | 'left' | 'right'; hint?: 'dotted' | 'question' }
     | { kind: 'heading'; id: string; text: string; level?: 3 | 4 | 5 }
     | { kind: 'icon'; id: string; icon: UiIconRef; size?: number }
     | { kind: 'badge'; id: string; text: string; variant?: 'neutral' | 'primary' | 'success' | 'warning' | 'error' | 'info' }
-    | { kind: 'toggle'; id: string; label?: string; value: boolean }
+    | { kind: 'toggle'; id: string; label?: string; value: boolean; style?: 'checkbox' | 'switch' | 'power'; size?: 'sm' | 'md' | 'lg'; tooltip?: string }
     | { kind: 'slider'; id: string; label?: string; min: number; max: number; step?: number; value: number; suffix?: string }
     | { kind: 'input'; id: string; label?: string; placeholder?: string; value: string }
     | { kind: 'select'; id: string; label?: string; value: string; options: { value: string; label: string }[] }
@@ -21,7 +21,13 @@ export type UiNode =
     | { kind: 'divider'; id: string }
     | { kind: 'spacer'; id: string; size?: number }
     | { kind: 'icon_picker'; id: string; label?: string; value: string; choices: string[] }
-    | { kind: 'iframe'; id: string; src_id: string; height?: number };
+    | { kind: 'iframe'; id: string; src_id: string; height?: number }
+    | { kind: 'tabs'; id: string; active_tab_id?: string; tabs: { id: string; label: string; content: UiNode }[] }
+    | { kind: 'menu_button'; id: string; text: string; icon?: UiIconRef; variant?: 'soft' | 'primary' | 'ghost' | 'warning'; items: UiMenuItem[] };
+
+export type UiMenuItem =
+    | { id: string; label: string; icon?: UiIconRef; disabled?: boolean }
+    | { id: string; label: string; icon?: UiIconRef; children: UiMenuItem[] };
 
 export type UiEventValue =
     | { type: 'bool'; value: boolean }

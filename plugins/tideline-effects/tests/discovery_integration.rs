@@ -7,6 +7,7 @@ fn save_and_load_cache_round_trips() {
     let cache = PluginScanCache {
         scanned_at: 12345,
         source_mtime_max: 67890,
+        source_entry_count: 0,
         plugins: vec![],
     };
     save_cache(&cache).unwrap();

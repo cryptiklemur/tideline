@@ -5,15 +5,41 @@
 //! at startup via [`PluginRegistry::set_backend`].
 
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AudioSource {
+    pub name: String,
+    pub description: String,
+}
 
 #[async_trait]
 pub trait HostBackend: Send + Sync {
-    /// Mute or unmute a PipeWire/PulseAudio source by node name.
     async fn set_source_mute(&self, node: &str, muted: bool) -> Result<(), String>;
 
-    /// Surface a desktop notification.
     async fn notify(&self, title: &str, body: &str) -> Result<(), String>;
+
+    async fn list_input_sources(&self) -> Result<Vec<AudioSource>, String>;
+
+    async fn config_namespace_get(&self, namespace: &str) -> Result<serde_json::Value, String>;
+
+    async fn config_namespace_set(
+        &self,
+        namespace: &str,
+        value: serde_json::Value,
+    ) -> Result<(), String>;
+
+    /// Attach plugin-owned data onto a channel's `plugin_data[namespace]` slot
+    /// and persist the config. Used by plugins to record per-channel state
+    /// that downstream contributors (pipewire, etc.) read back from the
+    /// AppConfig snapshot.
+    async fn attach_channel_data(
+        &self,
+        namespace: &str,
+        channel_uuid: uuid::Uuid,
+        value: serde_json::Value,
+    ) -> Result<(), String>;
 }
 
 pub struct NullBackend;
@@ -24,6 +50,30 @@ impl HostBackend for NullBackend {
         Ok(())
     }
     async fn notify(&self, _title: &str, _body: &str) -> Result<(), String> {
+        Ok(())
+    }
+    async fn list_input_sources(&self) -> Result<Vec<AudioSource>, String> {
+        Ok(Vec::new())
+    }
+    async fn config_namespace_get(
+        &self,
+        _namespace: &str,
+    ) -> Result<serde_json::Value, String> {
+        Ok(serde_json::Value::Null)
+    }
+    async fn config_namespace_set(
+        &self,
+        _namespace: &str,
+        _value: serde_json::Value,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+    async fn attach_channel_data(
+        &self,
+        _namespace: &str,
+        _channel_uuid: uuid::Uuid,
+        _value: serde_json::Value,
+    ) -> Result<(), String> {
         Ok(())
     }
 }

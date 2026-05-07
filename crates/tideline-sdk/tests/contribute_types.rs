@@ -5,6 +5,7 @@ use tideline_sdk::contribute::{PipewireContributeRequest, PipewireContributeResp
 fn request_roundtrips() {
     let req = PipewireContributeRequest {
         config: SerializedAppConfig { json: json!({"channels": []}) },
+        mix_mutes: vec![],
     };
     let s = serde_json::to_string(&req).unwrap();
     let _back: PipewireContributeRequest = serde_json::from_str(&s).unwrap();

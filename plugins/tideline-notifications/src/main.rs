@@ -62,7 +62,11 @@ impl Plugin for NotifPlugin {
             return;
         }
         let mode = params.get("mode").and_then(|m| m.as_str()).unwrap_or("");
-        let (title, body) = match mode {
+        let source_name = params
+            .get("source_name")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let (mode_label, body) = match mode {
             "open" => ("Open mic", "Microphone always on"),
             "ptt" => ("PTT mode", "Hold the bind to transmit"),
             other => {
@@ -70,7 +74,20 @@ impl Plugin for NotifPlugin {
                 return;
             }
         };
-        if let Err(e) = host.notify(title, body).await {
+        let title = if let Some(src) = source_name {
+            let label = match host.list_input_sources().await {
+                Ok(sources) => sources
+                    .iter()
+                    .find(|s| s.name == src)
+                    .map(|s| s.description.clone())
+                    .unwrap_or_else(|| src.clone()),
+                Err(_) => src.clone(),
+            };
+            format!("{} — {}", label, mode_label)
+        } else {
+            mode_label.to_string()
+        };
+        if let Err(e) = host.notify(&title, body).await {
             error!(?e, "host/notify failed");
         }
     }

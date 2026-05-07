@@ -171,7 +171,7 @@ mod tests {
     async fn render_overlay_returns_primary_when_chain_present() {
         let state = EffectsState::new("test");
         let chan = Uuid::new_v4();
-        state.attach_effect(chan, Effect::new_lv2("uri"), 0).await;
+        state.attach_effect(chan, Effect::new_lv2("uri")).await;
         let params = Some(json!({"surface_id": CHANNEL_CARD_SLOT, "channel_uuid": chan}));
         let v = render_overlay(&state, params).await.unwrap();
         assert_eq!(v["children"][0]["variant"], "primary");

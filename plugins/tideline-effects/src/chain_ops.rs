@@ -1,72 +1,55 @@
-//! Per-channel chain operations against the in-process carla engine.
-use std::panic::AssertUnwindSafe;
+//! Per-channel chain operations against the in-process audio engine.
 use std::sync::Arc;
+
+use anyhow::Result;
+use base64::Engine as _;
 use uuid::Uuid;
 
-use crate::carla::CarlaError;
 use crate::effect::Effect;
+use crate::host::PluginInfo;
 use crate::state::EffectsState;
 
-/// Convert a panic payload into a printable string.
-fn panic_msg(panic: Box<dyn std::any::Any + Send>) -> String {
-    panic
-        .downcast_ref::<&str>()
-        .map(|s| (*s).to_string())
-        .or_else(|| panic.downcast_ref::<String>().cloned())
-        .unwrap_or_else(|| "carla FFI panicked".into())
+pub(crate) fn slug_for_channel(channel_id: Uuid) -> String {
+    channel_id.simple().to_string()
+}
+
+pub(crate) fn decode_state(b64: &Option<String>) -> Option<Vec<u8>> {
+    let s = b64.as_ref()?;
+    base64::engine::general_purpose::STANDARD.decode(s).ok()
+}
+
+pub(crate) fn plugin_info_for(state: &EffectsState, effect: &Effect) -> Result<PluginInfo> {
+    state
+        .find_catalog_entry(effect.format, &effect.uri)
+        .ok_or_else(|| anyhow::anyhow!("plugin {} not in catalog", effect.uri))
 }
 
 pub async fn add_effect(
     state: Arc<EffectsState>,
     channel_id: Uuid,
     effect: Effect,
-) -> Result<u32, CarlaError> {
+) -> Result<()> {
     let engine = state
         .engine()
-        .await
-        .ok_or_else(|| CarlaError::Ffi("engine not initialized".into()))?;
-    let host = engine.lock().await;
-    let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
-        host.add_lv2(&effect.uri, &format!("{channel_id}:{}", effect.id))
-    }));
-    drop(host);
-    let plugin_id = match result {
-        Ok(r) => r?,
-        Err(panic) => {
-            let msg = panic_msg(panic);
-            crate::engine::mark_unhealthy(state.clone(), msg.clone()).await;
-            return Err(CarlaError::Ffi(msg));
-        }
-    };
-    state.attach_effect(channel_id, effect, plugin_id).await;
-    Ok(plugin_id)
+        .ok_or_else(|| anyhow::anyhow!("engine not initialized"))?;
+    let info = plugin_info_for(&state, &effect)?;
+    let slug = slug_for_channel(channel_id);
+    engine.ensure_channel(channel_id, &slug)?;
+    let state_blob = decode_state(&effect.state_b64);
+    engine.add_plugin(channel_id, effect.id, &info, state_blob.as_deref())?;
+    state.attach_effect(channel_id, effect).await;
+    Ok(())
 }
 
 pub async fn remove_effect(
     state: Arc<EffectsState>,
     channel_id: Uuid,
     effect_id: Uuid,
-) -> Result<(), CarlaError> {
+) -> Result<()> {
     let engine = state
         .engine()
-        .await
-        .ok_or_else(|| CarlaError::Ffi("engine not initialized".into()))?;
-    let plugin_id = state
-        .lookup_plugin_id(channel_id, effect_id)
-        .await
-        .ok_or_else(|| CarlaError::Ffi(format!("effect {effect_id} not in chain {channel_id}")))?;
-    let host = engine.lock().await;
-    let result = std::panic::catch_unwind(AssertUnwindSafe(|| host.remove(plugin_id)));
-    drop(host);
-    match result {
-        Ok(true) => {}
-        Ok(false) => return Err(CarlaError::Ffi("remove_plugin returned false".into())),
-        Err(panic) => {
-            let msg = panic_msg(panic);
-            crate::engine::mark_unhealthy(state.clone(), msg.clone()).await;
-            return Err(CarlaError::Ffi(msg));
-        }
-    }
+        .ok_or_else(|| anyhow::anyhow!("engine not initialized"))?;
+    engine.remove_plugin(channel_id, effect_id)?;
     state.detach_effect(channel_id, effect_id).await;
     Ok(())
 }
@@ -75,53 +58,11 @@ pub async fn reorder_chain(
     state: Arc<EffectsState>,
     channel_id: Uuid,
     new_order: Vec<Uuid>,
-) -> Result<(), CarlaError> {
+) -> Result<()> {
     let engine = state
         .engine()
-        .await
-        .ok_or_else(|| CarlaError::Ffi("engine not initialized".into()))?;
-    let current_order = state.chain_order(channel_id).await;
-    if current_order.len() != new_order.len() {
-        return Err(CarlaError::Ffi("reorder: length mismatch".into()));
-    }
-    let host = engine.lock().await;
-    let mut working = current_order.clone();
-    for (target_idx, target_eid) in new_order.iter().enumerate() {
-        let cur_idx = working
-            .iter()
-            .position(|e| e == target_eid)
-            .ok_or_else(|| CarlaError::Ffi(format!("reorder: {target_eid} missing")))?;
-        if cur_idx == target_idx {
-            continue;
-        }
-        let a_pid = state
-            .lookup_plugin_id(channel_id, working[cur_idx])
-            .await
-            .ok_or_else(|| CarlaError::Ffi("reorder: plugin id lookup".into()))?;
-        let b_pid = state
-            .lookup_plugin_id(channel_id, working[target_idx])
-            .await
-            .ok_or_else(|| CarlaError::Ffi("reorder: plugin id lookup".into()))?;
-        let result =
-            std::panic::catch_unwind(AssertUnwindSafe(|| host.switch_plugins(a_pid, b_pid)));
-        match result {
-            Ok(true) => {}
-            Ok(false) => {
-                drop(host);
-                return Err(CarlaError::Ffi(format!(
-                    "switch_plugins({a_pid},{b_pid}) failed"
-                )));
-            }
-            Err(panic) => {
-                drop(host);
-                let msg = panic_msg(panic);
-                crate::engine::mark_unhealthy(state.clone(), msg.clone()).await;
-                return Err(CarlaError::Ffi(msg));
-            }
-        }
-        working.swap(cur_idx, target_idx);
-    }
-    drop(host);
+        .ok_or_else(|| anyhow::anyhow!("engine not initialized"))?;
+    engine.reorder_chain(channel_id, &new_order)?;
     state.set_chain_order(channel_id, new_order).await;
     Ok(())
 }

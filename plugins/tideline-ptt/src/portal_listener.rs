@@ -48,7 +48,11 @@ const IFACE_REQUEST: &str = "org.freedesktop.portal.Request";
 
 /// Stable handle tokens. Unlike ashpd's auto-randomized defaults, these
 /// persist across launches so KDE re-uses the same shortcut entry.
-pub const SESSION_TOKEN: &str = "tideline_ptt";
+/// Versioned: bumping this forces KDE to create a fresh session, which is
+/// necessary when the registered action IDs change shape or when a new
+/// `preferred_trigger` needs to be propagated (BindShortcuts options are only
+/// honored when the action is first seen).
+pub const SESSION_TOKEN: &str = "tideline_ptt_v3";
 pub const REQ_TOKEN_CREATE: &str = "tideline_ptt_create";
 pub const REQ_TOKEN_BIND: &str = "tideline_ptt_bind";
 
@@ -59,6 +63,9 @@ pub const REQ_TOKEN_BIND: &str = "tideline_ptt_bind";
 ///   - portal not running / GlobalShortcuts unavailable
 ///   - bind rejected by the compositor
 ///   - timeout waiting for Response signal
+///
+/// Two global shortcut IDs are registered: `mode_toggle` and `hold`. Both fire
+/// against every enabled source.
 pub async fn try_start(runtime: Arc<PttRuntime>) -> Result<(), String> {
     let conn = Connection::session()
         .await
@@ -91,19 +98,42 @@ pub async fn try_start(runtime: Arc<PttRuntime>) -> Result<(), String> {
     .map_err(|e| format!("bad session path: {}", e))?
     .into();
 
-    let shortcuts: Vec<(&str, HashMap<&str, Value<'_>>)> = vec![
-        (
-            SHORTCUT_TOGGLE,
-            HashMap::from([(
-                "description",
-                Value::from("Toggle PTT mode (open mic / push-to-talk)"),
-            )]),
+    let cfg_snapshot = runtime.config.lock().await.clone();
+    let global_toggle_trigger = cfg_snapshot
+        .mode_toggle_binding
+        .as_ref()
+        .and_then(|b| b.to_portal_trigger());
+    let global_hold_trigger = cfg_snapshot
+        .hold_binding
+        .as_ref()
+        .and_then(|b| b.to_portal_trigger());
+    let make_opts = |description: String, trigger: Option<String>| -> HashMap<&str, Value<'_>> {
+        let mut opts: HashMap<&str, Value<'_>> = HashMap::new();
+        opts.insert("description", Value::from(description));
+        if let Some(t) = trigger {
+            opts.insert("preferred_trigger", Value::from(t));
+        }
+        opts
+    };
+    let mut shortcuts: Vec<(String, HashMap<&str, Value<'_>>)> = Vec::new();
+    shortcuts.push((
+        SHORTCUT_TOGGLE.to_string(),
+        make_opts(
+            "Toggle PTT mode (open mic / push-to-talk) — all enabled inputs".to_string(),
+            global_toggle_trigger.clone(),
         ),
-        (
-            SHORTCUT_HOLD,
-            HashMap::from([("description", Value::from("Hold to transmit"))]),
+    ));
+    shortcuts.push((
+        SHORTCUT_HOLD.to_string(),
+        make_opts(
+            "Hold to transmit — all enabled inputs".to_string(),
+            global_hold_trigger.clone(),
         ),
-    ];
+    ));
+    let shortcuts_ref: Vec<(&str, HashMap<&str, Value<'_>>)> = shortcuts
+        .iter()
+        .map(|(id, opts)| (id.as_str(), opts.clone()))
+        .collect();
     let parent_window = "";
     let mut bind_opts: HashMap<&str, Value<'_>> = HashMap::new();
     bind_opts.insert("handle_token", REQ_TOKEN_BIND.into());
@@ -112,7 +142,7 @@ pub async fn try_start(runtime: Arc<PttRuntime>) -> Result<(), String> {
         &conn,
         &portal,
         "BindShortcuts",
-        &(&session_path, shortcuts, parent_window, bind_opts),
+        &(&session_path, shortcuts_ref, parent_window, bind_opts),
         &unique_id,
         REQ_TOKEN_BIND,
     )
@@ -135,22 +165,44 @@ pub async fn try_start(runtime: Arc<PttRuntime>) -> Result<(), String> {
                 return;
             }
         };
+        let resolve = |id: &str| -> Option<&'static str> {
+            if id == SHORTCUT_TOGGLE {
+                return Some("toggle");
+            }
+            if id == SHORTCUT_HOLD {
+                return Some("hold");
+            }
+            None
+        };
         loop {
             tokio::select! {
                 msg = activated.next() => {
                     let Some(msg) = msg else { break };
                     if let Some(id) = parse_shortcut_id(&msg) {
-                        match id.as_str() {
-                            SHORTCUT_TOGGLE => runtime.toggle_mode().await,
-                            SHORTCUT_HOLD => runtime.hold_press().await,
-                            _ => {}
+                        eprintln!("PTT: portal Activated id={}", id);
+                        if let Some(kind) = resolve(&id) {
+                            let targets = runtime.config.lock().await.enabled_sources.clone();
+                            for src in targets {
+                                match kind {
+                                    "toggle" => runtime.toggle_mode(&src).await,
+                                    "hold" => runtime.hold_press(&src).await,
+                                    _ => {}
+                                }
+                            }
                         }
                     }
                 }
                 msg = deactivated.next() => {
                     let Some(msg) = msg else { break };
                     if let Some(id) = parse_shortcut_id(&msg) {
-                        if id == SHORTCUT_HOLD { runtime.hold_release().await; }
+                        eprintln!("PTT: portal Deactivated id={}", id);
+                        if let Some(kind) = resolve(&id) {
+                            if kind != "hold" { continue; }
+                            let targets = runtime.config.lock().await.enabled_sources.clone();
+                            for src in targets {
+                                runtime.hold_release(&src).await;
+                            }
+                        }
                     }
                 }
             }

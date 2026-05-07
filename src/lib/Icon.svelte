@@ -46,6 +46,13 @@ import Info from '@lucide/svelte/icons/info';
 import Cable from '@lucide/svelte/icons/cable';
 import ShieldCheck from '@lucide/svelte/icons/shield-check';
 import WandSparkles from '@lucide/svelte/icons/wand-sparkles';
+import Trash2 from '@lucide/svelte/icons/trash-2';
+import Power from '@lucide/svelte/icons/power';
+import RotateCw from '@lucide/svelte/icons/rotate-cw';
+import Folder from '@lucide/svelte/icons/folder';
+import Package from '@lucide/svelte/icons/package';
+import PackageOpen from '@lucide/svelte/icons/package-open';
+import Star from '@lucide/svelte/icons/star';
 
 export const ICONS = {
     headphones: Headphones,
@@ -95,6 +102,13 @@ export const ICONS = {
     cable: Cable,
     'shield-check': ShieldCheck,
     fx: WandSparkles,
+    trash: Trash2,
+    power: Power,
+    refresh: RotateCw,
+    folder: Folder,
+    package: Package,
+    'package-open': PackageOpen,
+    star: Star,
     'volume-up': Volume2,
 } as const;
 

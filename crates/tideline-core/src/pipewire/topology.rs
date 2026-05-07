@@ -34,8 +34,17 @@ fn loopback_directive(
     }
 }
 
-pub fn build_base_topology(cfg: &AppConfig) -> Vec<PipewireDirective> {
+pub fn build_base_topology(
+    cfg: &AppConfig,
+    mix_mutes: &[super::directive::MixMuteEntry],
+) -> Vec<PipewireDirective> {
     let mut out: Vec<PipewireDirective> = Vec::new();
+
+    let is_muted = |channel_name: &str, mix_id: &str| -> bool {
+        mix_mutes
+            .iter()
+            .any(|m| m.muted && m.channel_name == channel_name && m.mix_id == mix_id)
+    };
 
     for ch in &cfg.channels {
         if ch.kind == ChannelKind::PhysicalInput {
@@ -60,6 +69,9 @@ pub fn build_base_topology(cfg: &AppConfig) -> Vec<PipewireDirective> {
             ChannelKind::Output => {
                 let sink_name = sink_node_for_channel(ch);
                 for mix in &cfg.mixes {
+                    if is_muted(&ch.name, &mix.id) {
+                        continue;
+                    }
                     for (i, target) in mix.sinks.iter().enumerate() {
                         let cap = mix_capture_node(ch, mix, i);
                         let pb = mix_playback_node(ch, mix, i);
@@ -115,7 +127,42 @@ pub fn build_base_topology(cfg: &AppConfig) -> Vec<PipewireDirective> {
                 if ch.physical_source.is_empty() {
                     continue;
                 }
+                let s = slug(&ch.name);
+                let tag = RewireableTag {
+                    channel_uuid: ch.uuid.to_string(),
+                    role: role_for_kind(ch.kind).into(),
+                };
+
+                // Virtual FX source for this physical input. Apps (e.g.
+                // Discord) can pick this as their input device. Without
+                // an effects chain it passes physical_source through;
+                // the effects contributor replaces capture target with
+                // the fx node when a chain is present. Mute does NOT
+                // affect the FX source — apps wiring to it always get
+                // the channel's audio regardless of per-mix mute.
+                let virt_cap = format!("capture.{s}-fx-virtual");
+                let virt_pb = format!("playback.{s}-fx-source");
+                let virt_desc = format!("{} - FX", ch.name);
+                out.push(loopback_directive(
+                    vec![
+                        ("node.name".into(), quoted(virt_cap)),
+                        ("target.object".into(), quoted(&ch.physical_source)),
+                        ("audio.position".into(), quoted("FL,FR")),
+                        ("stream.dont-remix".into(), literal("true")),
+                    ],
+                    vec![
+                        ("node.name".into(), quoted(virt_pb)),
+                        ("node.description".into(), quoted(&virt_desc)),
+                        ("media.class".into(), quoted("Audio/Source/Virtual")),
+                        ("audio.position".into(), quoted("FL,FR")),
+                    ],
+                    tag.clone(),
+                ));
+
                 for mix in &cfg.mixes {
+                    if is_muted(&ch.name, &mix.id) {
+                        continue;
+                    }
                     for (i, target) in mix.sinks.iter().enumerate() {
                         let cap = mix_capture_node(ch, mix, i);
                         let pb = mix_playback_node(ch, mix, i);
@@ -133,10 +180,7 @@ pub fn build_base_topology(cfg: &AppConfig) -> Vec<PipewireDirective> {
                         out.push(loopback_directive(
                             capture_props,
                             playback_props,
-                            RewireableTag {
-                                channel_uuid: ch.uuid.to_string(),
-                                role: role_for_kind(ch.kind).into(),
-                            },
+                            tag.clone(),
                         ));
                     }
                 }

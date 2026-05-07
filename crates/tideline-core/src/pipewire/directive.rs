@@ -1,5 +1,16 @@
 use serde::{Deserialize, Serialize};
 
+/// Per-(channel, mix) mute state. `muted = true` tells the conf builder
+/// to SKIP emitting the post-loopback for that pairing — no audio path
+/// = silence in that mix. Lives in `tideline-core` so both base topology
+/// and plugin contributors can reason about it. The SDK re-exports it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MixMuteEntry {
+    pub channel_name: String,
+    pub mix_id: String,
+    pub muted: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RewireableTag {
     pub channel_uuid: String,
@@ -7,7 +18,7 @@ pub struct RewireableTag {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum LoadModuleHeader {
     /// Adapter-style entry: `{ factory = <name> args = { ... } }`. Lands in `context.objects`.
     Factory(String),
@@ -16,7 +27,7 @@ pub enum LoadModuleHeader {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum ArgValue {
     /// Bareword (no quotes): factory names, enum-like literals, booleans.
     Literal(String),

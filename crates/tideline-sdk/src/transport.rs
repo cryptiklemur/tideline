@@ -14,6 +14,7 @@ pub enum SdkTransportError {
     #[error("rpc: {0}")] Rpc(#[from] RpcError),
     #[error("closed")] Closed,
     #[error("timeout")] Timeout,
+    #[error("decode: {0}")] Decode(String),
 }
 
 pub struct StdioTransport {

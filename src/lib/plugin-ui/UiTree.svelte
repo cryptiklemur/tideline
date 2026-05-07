@@ -19,6 +19,8 @@ import UiDivider from './UiDivider.svelte';
 import UiSpacer from './UiSpacer.svelte';
 import UiIconPicker from './UiIconPicker.svelte';
 import UiIframe from './UiIframe.svelte';
+import UiTabs from './UiTabs.svelte';
+import UiMenuButton from './UiMenuButton.svelte';
 
 interface Props {
     node: UiNode;
@@ -67,6 +69,10 @@ let { node, surfaceId, pluginId, emit }: Props = $props();
     <UiIconPicker {node} {surfaceId} {emit} />
 {:else if node.kind === 'iframe'}
     <UiIframe {node} {pluginId} {surfaceId} />
+{:else if node.kind === 'tabs'}
+    <UiTabs {node} {surfaceId} {pluginId} {emit} />
+{:else if node.kind === 'menu_button'}
+    <UiMenuButton {node} {surfaceId} {emit} />
 {:else}
     <span data-testid="ui-unknown-kind" class="text-xs text-error">unknown:{(node as { kind: string }).kind}</span>
 {/if}

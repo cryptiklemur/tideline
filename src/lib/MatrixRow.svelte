@@ -213,9 +213,8 @@ async function toggleMixMute(mixId: string) {
     const prev = mixMutes;
     const next = !mixMutes[mixId];
     mixMutes = { ...mixMutes, [mixId]: next };
-    const idxs = mixIndexes[mixId] ?? [];
     try {
-        await Promise.all(idxs.map(idx => invoke('set_mute', { index: idx, muted: next })));
+        await invoke('set_channel_mix_mute', { channel: name, mixId, muted: next });
     } catch {
         mixMutes = prev;
     }
@@ -230,17 +229,10 @@ async function toggleMasterMute() {
             if (sourceName) await invoke('set_source_mute', { name: sourceName, muted: masterMuted });
             return;
         }
-        const calls: Promise<unknown>[] = [];
+        await invoke('set_channel_master_mute', { channel: name, muted: masterMuted });
         const next: Record<string, boolean> = {};
-        for (const m of mixes) {
-            const idxs = mixIndexes[m.id] ?? [];
-            next[m.id] = masterMuted;
-            for (const idx of idxs) {
-                calls.push(invoke('set_mute', { index: idx, muted: masterMuted }));
-            }
-        }
+        for (const m of mixes) next[m.id] = masterMuted;
         mixMutes = next;
-        await Promise.all(calls);
     } catch {
         masterMuted = prevMuted;
         mixMutes = prevMixMutes;

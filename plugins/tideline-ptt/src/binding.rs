@@ -168,6 +168,24 @@ impl Binding {
         ))
     }
 
+    /// Format this binding as an XDG GlobalShortcuts portal `preferred_trigger`
+    /// hint. Compositors like xdg-desktop-portal-kde accept strings of the form
+    /// `Ctrl+Shift+F12`. Returns `None` for mouse bindings since the portal
+    /// trigger format is keyboard-only.
+    pub fn to_portal_trigger(&self) -> Option<String> {
+        match self {
+            Binding::Keyboard { mods, key } => {
+                let mods_s = fmt_mods(mods);
+                if mods_s.is_empty() {
+                    Some(key.clone())
+                } else {
+                    Some(format!("{}+{}", mods_s, key))
+                }
+            }
+            Binding::Mouse { .. } => None,
+        }
+    }
+
     #[allow(dead_code)]
     pub fn format(&self) -> String {
         match self {

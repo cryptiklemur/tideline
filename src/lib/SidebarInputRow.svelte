@@ -2,11 +2,11 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { onMount, onDestroy, type Snippet } from 'svelte';
-import ChannelIcon from './ChannelIcon.svelte';
 import Icon from './Icon.svelte';
 import HFader from './HFader.svelte';
 import { portal } from './portal';
 import type { CardControl, ChannelConfig } from './types';
+import { pluginUi } from './plugin-ui/pluginUi.svelte';
 
 interface Props {
     inp: ChannelConfig;
@@ -40,7 +40,6 @@ let vol = $state(100);
 let muted = $state(false);
 let cardId = $state<number | null>(null);
 let cardControls = $state<CardControl[]>([]);
-let statePollTimer: ReturnType<typeof setInterval> | null = null;
 
 let primaryCapture = $derived(
     inp.kind === 'physical_input'
@@ -178,14 +177,57 @@ $effect(() => {
     };
 });
 
+let muteUnlisten: UnlistenFn | null = null;
+let volUnlisten: UnlistenFn | null = null;
+let cardCtrlUnlisten: UnlistenFn | null = null;
+
 onMount(() => {
     refreshState();
-    statePollTimer = setInterval(refreshState, 3000);
+    const muteEvent =
+        inp.kind === 'physical_input' ? 'tideline:source_mute_changed' : 'tideline:sink_mute_changed';
+    const muteKey = inp.kind === 'physical_input' ? 'source_name' : 'sink_name';
+    const targetName = inp.kind === 'physical_input' ? inp.physical_source : sinkName;
+    listen<Record<string, unknown>>(muteEvent, e => {
+        const payload = e.payload;
+        if (!payload || typeof payload !== 'object') return;
+        if ((payload as Record<string, unknown>)[muteKey] !== targetName) return;
+        const m = (payload as { muted?: unknown }).muted;
+        if (typeof m === 'boolean') muted = m;
+    }).then(fn => { muteUnlisten = fn; });
+
+    const volEvent =
+        inp.kind === 'physical_input' ? 'tideline:source_volume_changed' : 'tideline:sink_volume_changed';
+    listen<Record<string, unknown>>(volEvent, e => {
+        const payload = e.payload;
+        if (!payload || typeof payload !== 'object') return;
+        if ((payload as Record<string, unknown>)[muteKey] !== targetName) return;
+        const v = (payload as { volume_pct?: unknown }).volume_pct;
+        if (typeof v === 'number') {
+            // card-control reads override source volume when present, so only
+            // overwrite vol if there is no primary capture control.
+            if (!primaryCapture) vol = v;
+        }
+    }).then(fn => { volUnlisten = fn; });
+
+    listen<{ card: number; name: string; volume_pct: number }>('tideline:card_control_volume_changed', e => {
+        if (cardId === null || e.payload.card !== cardId) return;
+        const idx = cardControls.findIndex(c => c.name === e.payload.name);
+        if (idx >= 0) {
+            cardControls = cardControls.map((c, i) =>
+                i === idx ? { ...c, volume_percent: e.payload.volume_pct } : c
+            );
+            if (primaryCapture && primaryCapture.name === e.payload.name) {
+                vol = e.payload.volume_pct;
+            }
+        }
+    }).then(fn => { cardCtrlUnlisten = fn; });
 });
 
 onDestroy(() => {
-    if (statePollTimer !== null) clearInterval(statePollTimer);
     if (hideTimer !== null) clearTimeout(hideTimer);
+    muteUnlisten?.();
+    volUnlisten?.();
+    cardCtrlUnlisten?.();
 });
 
 async function toggleMute() {
@@ -227,6 +269,32 @@ async function onVolChange(v: number) {
 
 let sourceLabel = $derived(inp.kind === 'physical_input' ? inp.physical_source : sinkName);
 let kindLabel = $derived(inp.kind === 'physical_input' ? 'Hardware mic' : 'Virtual mic');
+
+type PttState = { mode?: 'open' | 'ptt'; transmitting?: boolean };
+let pttEnabledForRow = $derived(
+    inp.kind === 'physical_input' && inp.physical_source
+        ? pluginUi.contributions.input_overlays.some(
+              (o) =>
+                  o.plugin_id === 'tideline-ptt' &&
+                  !!o.values_by_source?.[inp.physical_source!]?.['tideline-ptt:input_enabled'],
+          )
+        : false,
+);
+let pttState = $derived(
+    (pluginUi.pluginEventBySource(
+        'tideline-ptt:state_changed',
+        inp.kind === 'physical_input' ? (inp.physical_source ?? '') : '',
+    ) as PttState | undefined) ?? {},
+);
+let pttBadge = $derived.by<{ label: string; tone: string } | null>(() => {
+    if (!pttEnabledForRow) return null;
+    if (pttState.mode === 'ptt') {
+        return pttState.transmitting
+            ? { label: 'LIVE', tone: 'bg-success/20 text-success border-success/40' }
+            : { label: 'PTT', tone: 'bg-error/20 text-error border-error/40' };
+    }
+    return { label: 'OPEN', tone: 'bg-base-content/10 text-base-content/70 border-base-content/25' };
+});
 </script>
 
 <li
@@ -246,11 +314,16 @@ let kindLabel = $derived(inp.kind === 'physical_input' ? 'Hardware mic' : 'Virtu
         onkeydown={onRowKeyDown}
         title={inp.name}
     >
-        <span class="nav-icon flex items-center justify-center flex-shrink-0">
-            <ChannelIcon icon={inp.icon ?? ''} kind={inp.kind} size={14} />
-        </span>
         <div class="flex flex-col min-w-0 flex-1 gap-1">
-            <span class="overflow-hidden text-ellipsis whitespace-nowrap leading-tight">{inp.name}</span>
+            <span class="flex items-center gap-1.5 overflow-hidden whitespace-nowrap leading-tight">
+                <span class="overflow-hidden text-ellipsis min-w-0">{inp.name}</span>
+                {#if pttBadge}
+                    <span
+                        class="flex-shrink-0 px-1 py-px text-[8px] font-bold tracking-widest uppercase border rounded {pttBadge.tone}"
+                        title={pttState.mode === 'ptt' ? (pttState.transmitting ? 'PTT live' : 'PTT muted') : 'Open mic'}
+                    >{pttBadge.label}</span>
+                {/if}
+            </span>
             {#if !muted}
                 <div class="relative h-1 rounded-sm overflow-hidden bg-base-300" aria-hidden="true">
                     <div class="absolute inset-y-0 left-0 bg-primary/40" style:width="{vol}%"></div>

@@ -86,7 +86,14 @@ impl Plugin for TestPlugin {
             "plugin/smoke_run" => {
                 let mut results: Vec<Value> = Vec::with_capacity(HOST_METHODS.len());
                 for m in HOST_METHODS {
-                    let res = host.call_raw(m, Some(json!({})), Duration::from_secs(2)).await;
+                    let params = match *m {
+                        "host/channel.attach_data" => json!({
+                            "channel_uuid": "00000000-0000-0000-0000-000000000000",
+                            "data": {},
+                        }),
+                        _ => json!({}),
+                    };
+                    let res = host.call_raw(m, Some(params), Duration::from_secs(2)).await;
                     let entry = match res {
                         Ok(_) => json!({"method": m, "ok": true, "error": Value::Null}),
                         Err(e) => json!({"method": m, "ok": false, "error": e.to_string()}),

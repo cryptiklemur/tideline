@@ -11,7 +11,6 @@ fn main() {
     for id in [
         "tideline-tones",
         "tideline-notifications",
-        "tideline-wave-xlr",
         "tideline-ptt",
         "tideline-effects",
     ] {
@@ -26,8 +25,7 @@ fn main() {
         for id in [
             "tideline-tones",
             "tideline-notifications",
-            "tideline-wave-xlr",
-            "tideline-ptt",
+                "tideline-ptt",
             "tideline-effects",
         ] {
             let bin = target_dir.join(id);

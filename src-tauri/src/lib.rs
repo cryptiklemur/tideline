@@ -16,7 +16,7 @@ use std::time::Duration;
 use tauri::{
     menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Manager, State, Wry,
+    AppHandle, Emitter, Manager, State, Wry,
 };
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
@@ -78,10 +78,91 @@ pub struct AppState {
     pub config: Mutex<AppConfig>,
 }
 
+/// Coalesces pipewire conf-rewrite requests from multiple call sites
+/// (rack_changed bus events, direct attach_channel_data nudges) into a
+/// single debounced rebuild. Held as Tauri state so any handler can poke
+/// it without round-tripping through the event bus.
+#[derive(Clone)]
+pub struct PipewireRebuildTrigger {
+    pub notify: std::sync::Arc<tokio::sync::Notify>,
+}
+
+impl PipewireRebuildTrigger {
+    pub fn new() -> Self {
+        Self {
+            notify: std::sync::Arc::new(tokio::sync::Notify::new()),
+        }
+    }
+    pub fn poke(&self) {
+        self.notify.notify_one();
+    }
+}
+
+impl Default for PipewireRebuildTrigger {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 use tideline_core::config_io::{load_config, save_config_to_disk, slug};
 
-fn pactl(args: &[&str]) {
-    let _ = Command::new("pactl").args(args).status();
+fn pactl_check(args: &[&str]) -> bool {
+    Command::new("pactl")
+        .args(args)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+const EVT_SOURCE_MUTE: &str = "tideline:source_mute_changed";
+const EVT_SINK_MUTE: &str = "tideline:sink_mute_changed";
+const EVT_SOURCE_VOLUME: &str = "tideline:source_volume_changed";
+const EVT_SINK_VOLUME: &str = "tideline:sink_volume_changed";
+const EVT_CARD_CONTROL_VOLUME: &str = "tideline:card_control_volume_changed";
+const EVT_SINK_INPUT_MUTE: &str = "tideline:sink_input_mute_changed";
+const EVT_SINK_INPUT_VOLUME: &str = "tideline:sink_input_volume_changed";
+
+fn emit_source_mute(app: &AppHandle, name: &str, muted: bool) {
+    let _ = app.emit(
+        EVT_SOURCE_MUTE,
+        serde_json::json!({ "source_name": name, "muted": muted }),
+    );
+}
+fn emit_sink_mute(app: &AppHandle, name: &str, muted: bool) {
+    let _ = app.emit(
+        EVT_SINK_MUTE,
+        serde_json::json!({ "sink_name": name, "muted": muted }),
+    );
+}
+fn emit_source_volume(app: &AppHandle, name: &str, volume_pct: u32) {
+    let _ = app.emit(
+        EVT_SOURCE_VOLUME,
+        serde_json::json!({ "source_name": name, "volume_pct": volume_pct }),
+    );
+}
+fn emit_sink_volume(app: &AppHandle, name: &str, volume_pct: u32) {
+    let _ = app.emit(
+        EVT_SINK_VOLUME,
+        serde_json::json!({ "sink_name": name, "volume_pct": volume_pct }),
+    );
+}
+fn emit_card_control_volume(app: &AppHandle, card: u32, name: &str, volume_pct: u32) {
+    let _ = app.emit(
+        EVT_CARD_CONTROL_VOLUME,
+        serde_json::json!({ "card": card, "name": name, "volume_pct": volume_pct }),
+    );
+}
+fn emit_sink_input_mute(app: &AppHandle, index: u32, muted: bool) {
+    let _ = app.emit(
+        EVT_SINK_INPUT_MUTE,
+        serde_json::json!({ "index": index, "muted": muted }),
+    );
+}
+fn emit_sink_input_volume(app: &AppHandle, index: u32, volume_pct: u32) {
+    let _ = app.emit(
+        EVT_SINK_INPUT_VOLUME,
+        serde_json::json!({ "index": index, "volume_pct": volume_pct }),
+    );
 }
 
 fn pactl_output(args: &[&str]) -> String {
@@ -425,13 +506,27 @@ pub struct ChannelVolumes {
     pub master: u32,
     #[serde(default)]
     pub mixes: HashMap<String, u32>,
+    /// Master mute for the channel — applies across every mix the channel
+    /// routes to. Pre-existing volumes files predate this field; default false.
+    #[serde(default)]
+    pub master_muted: bool,
+    /// Per-mix mute. Distinct from `master_muted` so users can mute the mic
+    /// from "Main Mix" while still sending it to "Voice Chat", etc. Defaults
+    /// to empty (i.e. unmuted) for older volumes files.
+    #[serde(default)]
+    pub mix_muted: HashMap<String, bool>,
 }
 
 fn default_master_pct() -> u32 { 100 }
 
 impl Default for ChannelVolumes {
     fn default() -> Self {
-        Self { master: 100, mixes: HashMap::new() }
+        Self {
+            master: 100,
+            mixes: HashMap::new(),
+            master_muted: false,
+            mix_muted: HashMap::new(),
+        }
     }
 }
 
@@ -440,6 +535,251 @@ fn read_all_volumes() -> HashMap<String, ChannelVolumes> {
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default()
+}
+
+
+/// Build the per-(channel, mix) mute table that the pipewire contributor
+/// needs. effective mute = master_muted || per-mix muted, surfaced as
+/// `MixMuteEntry { muted = true }` so the contributor skips the matching
+/// post-loopback. unmuted pairs are emitted with `muted = false` for
+/// completeness; the contributor only acts on muted=true entries.
+pub fn build_mix_mutes(cfg: &tideline_core::model::AppConfig) -> Vec<tideline_sdk::contribute::MixMuteEntry> {
+    let vols = read_all_volumes();
+    let mut out = Vec::new();
+    for ch in &cfg.channels {
+        let entry = vols.get(&ch.name);
+        for mix in &cfg.mixes {
+            let master = entry.map(|e| e.master_muted).unwrap_or(false);
+            let per_mix = entry
+                .and_then(|e| e.mix_muted.get(&mix.id).copied())
+                .unwrap_or(false);
+            out.push(tideline_sdk::contribute::MixMuteEntry {
+                channel_name: ch.name.clone(),
+                mix_id: mix.id.clone(),
+                muted: master || per_mix,
+            });
+        }
+    }
+    out
+}
+
+
+/// Find a pipewire module's object ID by the `node.name` property of one
+/// of its created nodes. Used to destroy a single loopback module without
+/// restarting pipewire.
+///
+/// Strategy: `pw-cli ls Module` lists modules with their args. The args
+/// for a loopback include `capture.props { ... node.name = "..." }` and
+/// `playback.props { ... node.name = "..." }`. We grep for the matching
+/// node.name and walk back to the enclosing module ID.
+///
+/// Returns None if no module matches (already destroyed, never created,
+/// pipewire not running, etc.).
+fn pw_find_module_by_node_name(node_name: &str) -> Option<u32> {
+    // Grep both Module list and Node list; modules expose Node objects we
+    // can match by their object.serial → match the parent module id.
+    // Easier path: list nodes filtered by node.name, read object.serial,
+    // look up which module owns it. But pw-cli's tree output is awkward
+    // to parse. Easiest reliable path: ls Module, regex for the node.name
+    // inside the module body.
+    let out = Command::new("pw-cli").args(["ls", "Module"]).output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let body = String::from_utf8_lossy(&out.stdout);
+    // pw-cli ls Module dumps blocks like:
+    //   id 56, type PipeWire:Interface:Module/3
+    //     ...
+    //     module.name = "libpipewire-module-loopback"
+    //     module.args = "{ capture.props = { node.name = \"playback.foo-...\" ..."
+    // We split by "id " at line start to get one block per module.
+    let mut current_id: Option<u32> = None;
+    for line in body.lines() {
+        let trimmed = line.trim_start();
+        if let Some(rest) = trimmed.strip_prefix("id ") {
+            // "id 56, type PipeWire:Interface:Module/3"
+            if let Some(comma) = rest.find(',') {
+                if let Ok(id) = rest[..comma].parse::<u32>() {
+                    current_id = Some(id);
+                }
+            }
+        }
+        if let Some(id) = current_id {
+            let needle = format!("node.name = \\\"{node_name}\\\"");
+            if line.contains(&needle) {
+                return Some(id);
+            }
+        }
+    }
+    None
+}
+
+/// Destroy a loaded pipewire module by its object ID. Returns true on
+/// success, false on failure (logged). No-op if id is None.
+fn pw_destroy_module(id: u32) -> bool {
+    let out = Command::new("pw-cli")
+        .args(["destroy", &id.to_string()])
+        .output();
+    match out {
+        Ok(o) if o.status.success() => true,
+        Ok(o) => {
+            eprintln!(
+                "[pw-mute] pw-cli destroy {id} failed: {}",
+                String::from_utf8_lossy(&o.stderr).trim()
+            );
+            false
+        }
+        Err(e) => {
+            eprintln!("[pw-mute] pw-cli destroy {id} spawn failed: {e}");
+            false
+        }
+    }
+}
+
+/// Load a libpipewire-module-loopback instance with the given inline
+/// args. The args string must already be wrapped in `{ ... }` and use
+/// pipewire's spa-json syntax (matches what
+/// `tideline-core::pipewire::serialize` emits inline).
+fn pw_load_loopback(inline_args: &str) -> bool {
+    let out = Command::new("pw-cli")
+        .args(["load-module", "libpipewire-module-loopback", inline_args])
+        .output();
+    match out {
+        Ok(o) if o.status.success() => true,
+        Ok(o) => {
+            eprintln!(
+                "[pw-mute] pw-cli load-module loopback failed: {}\nargs: {inline_args}",
+                String::from_utf8_lossy(&o.stderr).trim()
+            );
+            false
+        }
+        Err(e) => {
+            eprintln!("[pw-mute] pw-cli load-module spawn failed: {e}");
+            false
+        }
+    }
+}
+
+/// Build the inline args string for a single post-loopback. Mirrors
+/// what the conf builder (base topology or effects contributor) would
+/// emit for that (channel, mix, sink_idx) triple. `capture_target` is
+/// either the channel's fx node (when an effects chain is live) or its
+/// raw source (physical_source for PhysicalInput, channel sink for
+/// Output) — the caller picks the right one.
+fn build_post_loopback_args(
+    channel: &tideline_core::model::ChannelCfg,
+    mix: &tideline_core::model::Mix,
+    sink_idx: usize,
+    sink_target: &str,
+    capture_target: &str,
+) -> String {
+    let s = slug(&channel.name);
+    let cap_name = format!("capture.{}-{}-{}", s, mix.id, sink_idx);
+    let pb_name = format!("playback.{}-{}-{}", s, mix.id, sink_idx);
+    format!(
+        "{{ capture.props = {{ node.name = \"{cap_name}\" target.object = \"{capture_target}\" audio.position = \"FL,FR\" stream.dont-remix = true }} playback.props = {{ node.name = \"{pb_name}\" target.object = \"{sink_target}\" audio.position = \"FL,FR\" }} }}"
+    )
+}
+
+fn apply_mute_via_pw_cli(
+    cfg: &AppConfig,
+    channel_name: &str,
+    mix_id: Option<&str>,
+    effective_muted_for: impl Fn(&str) -> bool,
+) {
+    let Some(channel) = cfg.channels.iter().find(|c| c.name == channel_name) else {
+        eprintln!("[pw-mute] no channel named {channel_name}");
+        return;
+    };
+    use tideline_core::model::ChannelKind;
+    if !matches!(channel.kind, ChannelKind::PhysicalInput | ChannelKind::Output) {
+        return;
+    }
+    // Whether this channel has a live effects chain. Mirrors
+    // `chain_should_apply` in the effects plugin contributor: any
+    // non-bypassed effect means audio routes through the fx_node, so
+    // post-loopbacks must capture from there. Otherwise we capture
+    // from the channel's raw source (physical mic / channel sink).
+    let has_live_chain = channel
+        .plugin_data
+        .get("tideline-effects")
+        .and_then(|v| v.get("effects"))
+        .and_then(|e| e.as_array())
+        .map(|effects| {
+            effects.iter().any(|e| {
+                !e.get("bypassed")
+                    .and_then(|b| b.as_bool())
+                    .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false);
+    let chain_bypassed = channel
+        .plugin_data
+        .get("tideline-effects")
+        .and_then(|v| v.get("chain_bypassed"))
+        .and_then(|b| b.as_bool())
+        .unwrap_or(false);
+    let chain_active = has_live_chain && !chain_bypassed;
+    let capture_target = if chain_active {
+        format!("tideline-fx-{}", channel.uuid.simple())
+    } else {
+        match channel.kind {
+            ChannelKind::PhysicalInput => channel.physical_source.clone(),
+            ChannelKind::Output => {
+                // Mirror sink_node_for_channel logic.
+                channel
+                    .hp_node
+                    .strip_prefix("playback.")
+                    .and_then(|s| s.strip_suffix("-hp"))
+                    .map(|s| format!("sink.{}", s))
+                    .unwrap_or_else(|| format!("sink.{}", slug(&channel.name)))
+            }
+            ChannelKind::Input => unreachable!(),
+        }
+    };
+    let mixes_to_apply: Vec<&tideline_core::model::Mix> = match mix_id {
+        Some(id) => cfg.mixes.iter().filter(|m| m.id == id).collect(),
+        None => cfg.mixes.iter().collect(),
+    };
+    for mix in mixes_to_apply {
+        let muted = effective_muted_for(&mix.id);
+        for (i, target) in mix.sinks.iter().enumerate() {
+            let pb_name = format!(
+                "playback.{}-{}-{}",
+                slug(&channel.name),
+                mix.id,
+                i
+            );
+            if muted {
+                if let Some(id) = pw_find_module_by_node_name(&pb_name) {
+                    let ok = pw_destroy_module(id);
+                    eprintln!(
+                        "[pw-mute] mute {} ch={} mix={} sink_idx={} -> destroy module id={id} ok={ok}",
+                        pb_name, channel.name, mix.id, i
+                    );
+                } else {
+                    eprintln!(
+                        "[pw-mute] mute {} ch={} mix={} sink_idx={} -> no module found (already destroyed?)",
+                        pb_name, channel.name, mix.id, i
+                    );
+                }
+            } else {
+                if pw_find_module_by_node_name(&pb_name).is_some() {
+                    eprintln!(
+                        "[pw-mute] unmute {} ch={} mix={} sink_idx={} -> already loaded",
+                        pb_name, channel.name, mix.id, i
+                    );
+                    continue;
+                }
+                let args = build_post_loopback_args(channel, mix, i, target, &capture_target);
+                let ok = pw_load_loopback(&args);
+                eprintln!(
+                    "[pw-mute] unmute {} ch={} mix={} sink_idx={} cap={} -> load-module ok={ok}",
+                    pb_name, channel.name, mix.id, i, capture_target
+                );
+            }
+        }
+    }
 }
 
 fn write_all_volumes(map: &HashMap<String, ChannelVolumes>) {
@@ -462,14 +802,54 @@ fn sink_input_indexes_for_channel_mix(channel_slug: &str, mix_id: &str) -> Vec<u
         .collect()
 }
 
-fn apply_channel_volumes(channel_slug: &str, vols: &ChannelVolumes, mix_ids: &[String]) {
+fn apply_channel_volumes(app: &AppHandle, channel_slug: &str, vols: &ChannelVolumes, mix_ids: &[String]) {
+    // Volumes only. Mute is enforced at the pipewire conf level by
+    // skipping the post-loopback for muted (channel, mix) pairs (see
+    // set_channel_mix_mute / build_mix_mutes / pipewire_contributor).
+    // pulse sink-input mute did not propagate reliably to pw-native
+    // loopback streams, so trying to mute here was a no-op or worse.
+    let snapshot = fetch_sink_inputs();
     for mix_id in mix_ids {
         let mix_pct = vols.mixes.get(mix_id).copied().unwrap_or(100);
         let final_pct = product_pct(vols.master, mix_pct);
-        for idx in sink_input_indexes_for_channel_mix(channel_slug, mix_id) {
-            pactl(&["set-sink-input-volume", &idx.to_string(), &format!("{}%", final_pct)]);
+        let prefix = format!("playback.{}-{}-", channel_slug, mix_id);
+        let indexes: Vec<u32> = snapshot
+            .iter()
+            .filter(|s| s.node_name.starts_with(&prefix))
+            .map(|s| s.index)
+            .collect();
+        for idx in &indexes {
+            if pactl_check(&["set-sink-input-volume", &idx.to_string(), &format!("{}%", final_pct)]) {
+                emit_sink_input_volume(app, *idx, final_pct);
+            }
         }
     }
+}
+
+/// Reapply persisted master/per-mix mute and volume to every sink-input.
+/// Called after pipewire/wireplumber restart, where every sink-input is
+/// freshly minted at default unmuted/100% — without this, "muted in the
+/// mix" silently flips back to live audio whenever the rack changes.
+pub fn reapply_all_channel_volumes_and_mutes(app: &AppHandle) {
+    let Some(state) = app.try_state::<AppState>() else {
+        eprintln!("[mute-restore] AppState missing, skipping");
+        return;
+    };
+    let cfg = state.config.lock().unwrap().clone();
+    let all_vols = read_all_volumes();
+    let mix_ids: Vec<String> = cfg.mixes.iter().map(|m| m.id.clone()).collect();
+    let mut applied = 0usize;
+    for ch in &cfg.channels {
+        if let Some(vols) = all_vols.get(&ch.name) {
+            apply_channel_volumes(app, &slug(&ch.name), vols, &mix_ids);
+            applied += 1;
+        }
+    }
+    eprintln!(
+        "[mute-restore] reapplied volumes/mutes for {} channels across {} mixes",
+        applied,
+        mix_ids.len()
+    );
 }
 
 #[tauri::command]
@@ -478,7 +858,7 @@ fn get_all_channel_volumes() -> HashMap<String, ChannelVolumes> {
 }
 
 #[tauri::command]
-fn set_channel_master_volume(channel: String, pct: u32, state: State<'_, AppState>) {
+fn set_channel_master_volume(app: AppHandle, channel: String, pct: u32, state: State<'_, AppState>) {
     let cfg = state.config.lock().unwrap().clone();
     let mix_ids: Vec<String> = cfg.mixes.iter().map(|m| m.id.clone()).collect();
     let mut all = read_all_volumes();
@@ -486,11 +866,11 @@ fn set_channel_master_volume(channel: String, pct: u32, state: State<'_, AppStat
     entry.master = pct.min(100);
     let snap = entry.clone();
     write_all_volumes(&all);
-    apply_channel_volumes(&slug(&channel), &snap, &mix_ids);
+    apply_channel_volumes(&app, &slug(&channel), &snap, &mix_ids);
 }
 
 #[tauri::command]
-fn set_channel_mix_volume(channel: String, mix_id: String, pct: u32) {
+fn set_channel_mix_volume(app: AppHandle, channel: String, mix_id: String, pct: u32) {
     let mut all = read_all_volumes();
     let entry = all.entry(channel.clone()).or_default();
     entry.mixes.insert(mix_id.clone(), pct.min(100));
@@ -498,7 +878,87 @@ fn set_channel_mix_volume(channel: String, mix_id: String, pct: u32) {
     write_all_volumes(&all);
     let final_pct = product_pct(snap.master, pct.min(100));
     for idx in sink_input_indexes_for_channel_mix(&slug(&channel), &mix_id) {
-        pactl(&["set-sink-input-volume", &idx.to_string(), &format!("{}%", final_pct)]);
+        if pactl_check(&["set-sink-input-volume", &idx.to_string(), &format!("{}%", final_pct)]) {
+            emit_sink_input_volume(&app, idx, final_pct);
+        }
+    }
+}
+
+
+#[tauri::command]
+fn set_channel_master_mute(
+    app: AppHandle,
+    channel: String,
+    muted: bool,
+    state: State<'_, AppState>,
+) {
+    let cfg = state.config.lock().unwrap().clone();
+    let mix_ids: Vec<String> = cfg.mixes.iter().map(|m| m.id.clone()).collect();
+    let mut all = read_all_volumes();
+    let entry = all.entry(channel.clone()).or_default();
+    entry.master_muted = muted;
+    let snap = entry.clone();
+    let mix_muted_snap = entry.mix_muted.clone();
+    write_all_volumes(&all);
+    // Master mute affects every mix the channel routes to. Targeted
+    // pw-cli toggles every post-loopback for this channel — no restart.
+    apply_mute_via_pw_cli(&cfg, &channel, None, |mid| {
+        muted || mix_muted_snap.get(mid).copied().unwrap_or(false)
+    });
+    // Background conf rewrite so next pipewire restart preserves state.
+    let cfg_for_conf = cfg.clone();
+    let registry_opt = app
+        .try_state::<Arc<tideline_host::PluginRegistry>>()
+        .map(|s| s.inner().clone());
+    if let Some(registry) = registry_opt {
+        tauri::async_runtime::spawn(async move {
+            if let Err(e) = write_pipewire_conf_only(&cfg_for_conf, &registry).await {
+                eprintln!("[pw-mute] conf rewrite failed: {e}");
+            }
+        });
+    }
+    apply_channel_volumes(&app, &slug(&channel), &snap, &mix_ids);
+    // Mirror the master mute UI event onto every mix's sink-inputs.
+    for mix_id in &mix_ids {
+        for idx in sink_input_indexes_for_channel_mix(&slug(&channel), mix_id) {
+            emit_sink_input_mute(&app, idx, muted);
+        }
+    }
+}
+
+#[tauri::command]
+fn set_channel_mix_mute(app: AppHandle, channel: String, mix_id: String, muted: bool, state: State<'_, AppState>) {
+    let cfg = state.config.lock().unwrap().clone();
+    let mut all = read_all_volumes();
+    let entry = all.entry(channel.clone()).or_default();
+    entry.mix_muted.insert(mix_id.clone(), muted);
+    let master_muted = entry.master_muted;
+    let mix_muted_snap = entry.mix_muted.clone();
+    let effective = master_muted || muted;
+    write_all_volumes(&all);
+    // Immediate effect: targeted pw-cli load/destroy of the affected
+    // mix's post-loopback. NO pipewire restart, just that one mix's
+    // audio path toggles.
+    apply_mute_via_pw_cli(&cfg, &channel, Some(&mix_id), |mid| {
+        master_muted || mix_muted_snap.get(mid).copied().unwrap_or(false)
+    });
+    // Background: rewrite the pipewire conf so next pipewire restart
+    // starts in the correct state. NO restart triggered — the running
+    // graph already matches via the pw-cli calls above.
+    let cfg_for_conf = cfg.clone();
+    let registry_opt = app
+        .try_state::<Arc<tideline_host::PluginRegistry>>()
+        .map(|s| s.inner().clone());
+    if let Some(registry) = registry_opt {
+        tauri::async_runtime::spawn(async move {
+            if let Err(e) = write_pipewire_conf_only(&cfg_for_conf, &registry).await {
+                eprintln!("[pw-mute] conf rewrite failed: {e}");
+            }
+        });
+    }
+    // UI-facing event so strip mute indicators update immediately.
+    for idx in sink_input_indexes_for_channel_mix(&slug(&channel), &mix_id) {
+        emit_sink_input_mute(&app, idx, effective);
     }
 }
 
@@ -521,7 +981,7 @@ fn mix_enabled_with_defaults(stored: &HashMap<String, bool>, mixes: &[Mix]) -> H
         .collect()
 }
 
-fn apply_mix_enabled(enabled: &HashMap<String, bool>, cfg: &AppConfig) {
+fn apply_mix_enabled(app: &AppHandle, enabled: &HashMap<String, bool>, cfg: &AppConfig) {
     let inputs = fetch_sink_inputs();
     let lookup: HashMap<&str, u32> = inputs
         .iter()
@@ -531,11 +991,14 @@ fn apply_mix_enabled(enabled: &HashMap<String, bool>, cfg: &AppConfig) {
     for ch in &cfg.channels {
         if ch.kind != ChannelKind::Output { continue; }
         for mix in &cfg.mixes {
-            let mute_arg = if *enabled.get(&mix.id).unwrap_or(&true) { "0" } else { "1" };
+            let muted = !*enabled.get(&mix.id).unwrap_or(&true);
+            let mute_arg = if muted { "1" } else { "0" };
             for (i, _) in mix.sinks.iter().enumerate() {
                 let pb = mix_playback_node(ch, mix, i);
                 if let Some(&idx) = lookup.get(pb.as_str()) {
-                    pactl(&["set-sink-input-mute", &idx.to_string(), mute_arg]);
+                    if pactl_check(&["set-sink-input-mute", &idx.to_string(), mute_arg]) {
+                        emit_sink_input_mute(app, idx, muted);
+                    }
                 }
             }
         }
@@ -547,28 +1010,297 @@ use tideline_core::pipewire::{
     write_pipewire_conf_with_contributions,
 };
 
-fn restart_pipewire_stack() {
+async fn restart_pipewire_stack(registry: &Arc<tideline_host::PluginRegistry>) {
+    // Snapshot current source mute state BEFORE restart so we can restore it
+    // afterward. systemctl restart wireplumber wipes mute on every source —
+    // a plugin-side restore via host:pipewire_restarted is racy because the
+    // event can arrive before the plugin has resubscribed. The host doing
+    // the snapshot itself is the only reliable path.
+    let mute_snapshot = snapshot_source_mutes();
+    registry
+        .publish_host_event("host:pipewire_restarting", serde_json::json!({}))
+        .await;
     let _ = Command::new("systemctl")
         .args(["--user", "restart", "wireplumber", "pipewire-pulse", "pipewire"])
         .status();
+    // Give the stack a moment to come back up before notifying plugins to
+    // re-attach. Without this the JACK socket may not be ready when our
+    // tries to reconnect.
+    tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+    restore_source_mutes(&mute_snapshot);
+    registry
+        .publish_host_event("host:pipewire_restarted", serde_json::json!({}))
+        .await;
 }
 
-fn write_pipewire_and_restart(cfg: &AppConfig) -> Result<String, String> {
-    let contributions: Vec<Vec<tideline_core::pipewire::directive::PipewireDirective>> =
-        tideline_host::contribute::resolve_collisions(
-            tideline_host::contribute::collect_pipewire_contributions(cfg),
-        )
-        .into_iter()
-        .map(|c| c.directives)
+/// Capture `(source_name, muted)` pairs via `pactl list sources`. Used as a
+/// belt-and-suspenders mute restoration around pipewire restarts.
+fn snapshot_source_mutes() -> Vec<(String, bool)> {
+    let raw = pactl_output(&["-f", "json", "list", "sources"]);
+    let json: serde_json::Value = serde_json::from_str(&raw).unwrap_or_default();
+    let arr = match json.as_array() {
+        Some(a) => a,
+        None => return Vec::new(),
+    };
+    let mut out = Vec::new();
+    for item in arr {
+        let name = item.get("name").and_then(|v| v.as_str()).unwrap_or("");
+        if name.is_empty() {
+            continue;
+        }
+        let muted = item.get("mute").and_then(|v| v.as_bool()).unwrap_or(false);
+        out.push((name.to_string(), muted));
+    }
+    eprintln!("[pipewire] snapshot_source_mutes captured {} sources", out.len());
+    out
+}
+
+fn restore_source_mutes(snapshot: &[(String, bool)]) {
+    let mut restored = 0usize;
+    for (name, muted) in snapshot {
+        if pactl_check(&["set-source-mute", name, if *muted { "1" } else { "0" }]) {
+            restored += 1;
+        }
+    }
+    eprintln!(
+        "[pipewire] restore_source_mutes: restored {}/{}",
+        restored,
+        snapshot.len()
+    );
+}
+
+/// Serializes pipewire conf rewrites + restarts. Concurrent callers
+/// (rebuild worker, startup write, frontend command) would otherwise
+/// stomp on each other: snapshot_source_mutes captures stale state,
+/// pipewire restarts twice in rapid succession, and the second restart
+/// kills JACK clients before the engine has finished re-instantiating
+/// them from the first restart.
+static PW_RESTART_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+pub async fn write_pipewire_and_restart(
+    cfg: &AppConfig,
+    registry: &Arc<tideline_host::PluginRegistry>,
+) -> Result<String, String> {
+    let _guard = PW_RESTART_MUTEX.lock().await;
+    let channels_with_fx: Vec<&str> = cfg
+        .channels
+        .iter()
+        .filter(|c| {
+            c.plugin_data
+                .get("tideline-effects")
+                .and_then(|v| v.get("effects"))
+                .and_then(|e| e.as_array())
+                .map(|a| !a.is_empty())
+                .unwrap_or(false)
+        })
+        .map(|c| c.name.as_str())
         .collect();
-    let backed_up = write_pipewire_conf_with_contributions(cfg, &contributions)?;
-    restart_pipewire_stack();
+    eprintln!(
+        "[pipewire] write_pipewire_and_restart: channels_total={} channels_with_fx={:?}",
+        cfg.channels.len(),
+        channels_with_fx
+    );
+    let mix_mutes = build_mix_mutes(cfg);
+    let raw = tideline_host::contribute::collect_pipewire_contributions(registry, cfg, &mix_mutes).await;
+    let raw_counts: Vec<(String, usize)> = raw
+        .iter()
+        .map(|c| (c.plugin_id.clone(), c.directives.len()))
+        .collect();
+    eprintln!("[pipewire] raw contributions: {:?}", raw_counts);
+    let contributions: Vec<Vec<tideline_core::pipewire::directive::PipewireDirective>> =
+        tideline_host::contribute::resolve_collisions(raw)
+            .into_iter()
+            .map(|c| c.directives)
+            .collect();
+    let post_counts: Vec<usize> = contributions.iter().map(|d| d.len()).collect();
+    eprintln!("[pipewire] post-resolve directive counts: {:?}", post_counts);
+    // Skip restart entirely if the rendered conf is byte-identical to what's
+    // already on disk. This collapses the rapid-fire rebuilds (multiple
+    // attach_channel_data + rack_changed pokes within the same debounce
+    // window) into a single state transition.
+    let new_body = tideline_core::pipewire::build_pipewire_conf(cfg, &contributions, &mix_mutes);
+    let conf_path = tideline_core::config_io::pipewire_conf_dir()
+        .join(tideline_core::pipewire::TIDELINE_PIPEWIRE_FILE);
+    let unchanged = std::fs::read_to_string(&conf_path)
+        .map(|existing| existing == new_body)
+        .unwrap_or(false);
+    if unchanged {
+        eprintln!("[pipewire] conf unchanged — skipping restart, re-wiring fx links only");
+        wire_fx_links(cfg).await;
+        return Ok("Already current. (no restart)".into());
+    }
+    let backed_up = write_pipewire_conf_with_contributions(cfg, &contributions, &mix_mutes)?;
+    restart_pipewire_stack(registry).await;
+    // Pipewire's autoconnect can't link to JACK clients (media.class=null),
+    // so the contributor sets node.autoconnect=false on fx_node-targeted
+    // loopback sides and we explicitly link them here. Retries because the
+    // engine takes ~800ms-2s to re-instantiate JACK clients after restart.
+    wire_fx_links(cfg).await;
 
     let mut msg = String::from("Applied. Audio engine restarted.");
     if !backed_up.is_empty() {
         msg.push_str(&format!(" Legacy files backed up: {}", backed_up.join(", ")));
     }
     Ok(msg)
+}
+
+/// Creates explicit pipewire links between fx loopbacks and per-channel JACK
+/// clients (`tideline-fx-{simple_uuid}`). Idempotent — pw-link returns
+/// "File exists" on duplicate links, which we silently swallow.
+pub async fn wire_fx_links(cfg: &AppConfig) {
+    let mix_mutes = build_mix_mutes(cfg);
+    let is_muted = |ch: &str, mix_id: &str| -> bool {
+        mix_mutes
+            .iter()
+            .any(|m| m.muted && m.channel_name == ch && m.mix_id == mix_id)
+    };
+
+    let mut pairs: Vec<(String, String)> = Vec::new();
+    for ch in &cfg.channels {
+        let effects_data = ch.plugin_data.get("tideline-effects");
+        let any_active = effects_data
+            .and_then(|v| v.get("effects"))
+            .and_then(|e| e.as_array())
+            .map(|a| {
+                a.iter().any(|e| {
+                    !e.get("bypassed")
+                        .and_then(|b| b.as_bool())
+                        .unwrap_or(false)
+                })
+            })
+            .unwrap_or(false);
+        let chain_bypassed = effects_data
+            .and_then(|v| v.get("chain_bypassed"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if !any_active || chain_bypassed {
+            continue;
+        }
+        if matches!(ch.kind, ChannelKind::PhysicalInput) && ch.physical_source.is_empty() {
+            continue;
+        }
+
+        let s = slug(&ch.name);
+        let fx = format!("tideline-fx-{}", ch.uuid.simple());
+
+        match ch.kind {
+            ChannelKind::Output | ChannelKind::PhysicalInput => {
+                pairs.push((
+                    format!("playback.{s}-fx-pre:output_FL"),
+                    format!("{fx}:in_FL"),
+                ));
+                pairs.push((
+                    format!("playback.{s}-fx-pre:output_FR"),
+                    format!("{fx}:in_FR"),
+                ));
+            }
+            ChannelKind::Input => {
+                for i in 0..ch.sources.len() {
+                    pairs.push((
+                        format!("playback.{s}-fx-src-{i}:output_FL"),
+                        format!("{fx}:in_FL"),
+                    ));
+                    pairs.push((
+                        format!("playback.{s}-fx-src-{i}:output_FR"),
+                        format!("{fx}:in_FR"),
+                    ));
+                }
+            }
+        }
+
+        match ch.kind {
+            ChannelKind::Output | ChannelKind::PhysicalInput => {
+                if matches!(ch.kind, ChannelKind::PhysicalInput) {
+                    pairs.push((
+                        format!("{fx}:out_FL"),
+                        format!("capture.{s}-fx-virtual:input_FL"),
+                    ));
+                    pairs.push((
+                        format!("{fx}:out_FR"),
+                        format!("capture.{s}-fx-virtual:input_FR"),
+                    ));
+                }
+                for mix in &cfg.mixes {
+                    if is_muted(&ch.name, &mix.id) {
+                        continue;
+                    }
+                    for (i, _target) in mix.sinks.iter().enumerate() {
+                        let cap = mix_capture_node(ch, mix, i);
+                        pairs.push((format!("{fx}:out_FL"), format!("{cap}:input_FL")));
+                        pairs.push((format!("{fx}:out_FR"), format!("{cap}:input_FR")));
+                    }
+                }
+            }
+            ChannelKind::Input => {
+                pairs.push((
+                    format!("{fx}:out_FL"),
+                    format!("capture.{s}-fx-post:input_FL"),
+                ));
+                pairs.push((
+                    format!("{fx}:out_FR"),
+                    format!("capture.{s}-fx-post:input_FR"),
+                ));
+            }
+        }
+    }
+
+    if pairs.is_empty() {
+        return;
+    }
+    eprintln!("[fx-link] wiring {} pw-link pairs", pairs.len());
+
+    let mut remaining = pairs;
+    for attempt in 0..10 {
+        if remaining.is_empty() {
+            break;
+        }
+        if attempt > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        }
+        let mut next = Vec::new();
+        for (out, inp) in remaining.drain(..) {
+            match Command::new("pw-link").arg(&out).arg(&inp).output() {
+                Ok(o) if o.status.success() => {}
+                Ok(o) => {
+                    let stderr = String::from_utf8_lossy(&o.stderr);
+                    if stderr.contains("File exists") {
+                        // Already linked — fine.
+                    } else {
+                        next.push((out, inp));
+                    }
+                }
+                Err(_) => next.push((out, inp)),
+            }
+        }
+        remaining = next;
+    }
+    if !remaining.is_empty() {
+        for (out, inp) in &remaining {
+            eprintln!("[fx-link] gave up: {out} -> {inp}");
+        }
+    } else {
+        eprintln!("[fx-link] all pairs linked");
+    }
+}
+
+
+/// Like `write_pipewire_and_restart` but DOES NOT restart pipewire. Used
+/// when a change has already been applied incrementally via pw-cli
+/// (e.g. per-mix mute toggle) and we just need the conf on disk to
+/// reflect the new desired state for the next pipewire restart.
+pub async fn write_pipewire_conf_only(
+    cfg: &AppConfig,
+    registry: &Arc<tideline_host::PluginRegistry>,
+) -> Result<(), String> {
+    let mix_mutes = build_mix_mutes(cfg);
+    let raw = tideline_host::contribute::collect_pipewire_contributions(registry, cfg, &mix_mutes).await;
+    let contributions: Vec<Vec<tideline_core::pipewire::directive::PipewireDirective>> =
+        tideline_host::contribute::resolve_collisions(raw)
+            .into_iter()
+            .map(|c| c.directives)
+            .collect();
+    write_pipewire_conf_with_contributions(cfg, &contributions, &mix_mutes)?;
+    Ok(())
 }
 
 fn channel_settings_equal(a: &ChannelCfg, b: &ChannelCfg) -> bool {
@@ -618,6 +1350,8 @@ fn pw_cli_load(module: &str, args: &str) -> Result<(), String> {
     }
     Ok(())
 }
+
+
 
 fn pactl_load_null_sink(sink_name: &str, description: &str) -> Result<(), String> {
     let args = format!(
@@ -704,12 +1438,12 @@ fn load_channel_modules(cfg: &AppConfig, ch: &ChannelCfg) -> Result<(), String> 
     Ok(())
 }
 
-fn reapply_mix_enabled_state(state: &State<'_, AppState>) {
+fn reapply_mix_enabled_state(app: &AppHandle, state: &State<'_, AppState>) {
     let cfg = state.config.lock().unwrap().clone();
     let stored = state.mix_enabled.lock().unwrap().clone();
     let map = mix_enabled_with_defaults(&stored, &cfg.mixes);
     write_mix_enabled(&map);
-    apply_mix_enabled(&map, &cfg);
+    apply_mix_enabled(app, &map, &cfg);
     *state.mix_enabled.lock().unwrap() = map;
 }
 
@@ -719,23 +1453,31 @@ fn get_sink_inputs() -> Vec<SinkInput> {
 }
 
 #[tauri::command]
-fn set_volume(index: u32, pct: u32) {
-    pactl(&["set-sink-input-volume", &index.to_string(), &format!("{}%", pct)]);
+fn set_volume(app: AppHandle, index: u32, pct: u32) {
+    if pactl_check(&["set-sink-input-volume", &index.to_string(), &format!("{}%", pct)]) {
+        emit_sink_input_volume(&app, index, pct);
+    }
 }
 
 #[tauri::command]
-fn set_mute(index: u32, muted: bool) {
-    pactl(&["set-sink-input-mute", &index.to_string(), if muted { "1" } else { "0" }]);
+fn set_mute(app: AppHandle, index: u32, muted: bool) {
+    if pactl_check(&["set-sink-input-mute", &index.to_string(), if muted { "1" } else { "0" }]) {
+        emit_sink_input_mute(&app, index, muted);
+    }
 }
 
 #[tauri::command]
-fn set_sink_volume(name: String, pct: u32) {
-    pactl(&["set-sink-volume", &name, &format!("{}%", pct)]);
+fn set_sink_volume(app: AppHandle, name: String, pct: u32) {
+    if pactl_check(&["set-sink-volume", &name, &format!("{}%", pct)]) {
+        emit_sink_volume(&app, &name, pct);
+    }
 }
 
 #[tauri::command]
-fn set_sink_mute(name: String, muted: bool) {
-    pactl(&["set-sink-mute", &name, if muted { "1" } else { "0" }]);
+fn set_sink_mute(app: AppHandle, name: String, muted: bool) {
+    if pactl_check(&["set-sink-mute", &name, if muted { "1" } else { "0" }]) {
+        emit_sink_mute(&app, &name, muted);
+    }
 }
 
 #[tauri::command]
@@ -763,13 +1505,17 @@ fn list_sources() -> Vec<SourceInfo> {
 }
 
 #[tauri::command]
-fn set_source_volume(name: String, pct: u32) {
-    pactl(&["set-source-volume", &name, &format!("{}%", pct)]);
+fn set_source_volume(app: AppHandle, name: String, pct: u32) {
+    if pactl_check(&["set-source-volume", &name, &format!("{}%", pct)]) {
+        emit_source_volume(&app, &name, pct);
+    }
 }
 
 #[tauri::command]
-fn set_source_mute(name: String, muted: bool) {
-    pactl(&["set-source-mute", &name, if muted { "1" } else { "0" }]);
+fn set_source_mute(app: AppHandle, name: String, muted: bool) {
+    if pactl_check(&["set-source-mute", &name, if muted { "1" } else { "0" }]) {
+        emit_source_mute(&app, &name, muted);
+    }
 }
 
 #[tauri::command]
@@ -789,6 +1535,117 @@ fn get_source_state(name: String) -> Option<(u32, bool)> {
         }
     }
     None
+}
+
+fn parse_pactl_volume_pct(item: &serde_json::Value) -> u32 {
+    item["volume"]
+        .as_object()
+        .and_then(|m| m.values().next())
+        .and_then(|v| v["value_percent"].as_str())
+        .and_then(|s| s.trim_end_matches('%').parse::<u32>().ok())
+        .unwrap_or(100)
+}
+
+fn snapshot_sources_state() -> HashMap<String, (u32, bool)> {
+    let raw = pactl_output(&["-f", "json", "list", "sources"]);
+    let json: serde_json::Value = serde_json::from_str(&raw).unwrap_or_default();
+    let mut out = HashMap::new();
+    for item in json.as_array().unwrap_or(&vec![]) {
+        if let Some(name) = item["name"].as_str() {
+            let muted = item["mute"].as_bool().unwrap_or(false);
+            let volume = parse_pactl_volume_pct(item);
+            out.insert(name.to_string(), (volume, muted));
+        }
+    }
+    out
+}
+
+fn snapshot_sinks_state() -> HashMap<String, (u32, bool)> {
+    let raw = pactl_output(&["-f", "json", "list", "sinks"]);
+    let json: serde_json::Value = serde_json::from_str(&raw).unwrap_or_default();
+    let mut out = HashMap::new();
+    for item in json.as_array().unwrap_or(&vec![]) {
+        if let Some(name) = item["name"].as_str() {
+            let muted = item["mute"].as_bool().unwrap_or(false);
+            let volume = parse_pactl_volume_pct(item);
+            out.insert(name.to_string(), (volume, muted));
+        }
+    }
+    out
+}
+
+fn spawn_audio_state_watcher(app: AppHandle) {
+    use std::io::{BufRead, BufReader};
+    use std::process::Stdio;
+    thread::spawn(move || {
+        let mut last_sources = snapshot_sources_state();
+        let mut last_sinks = snapshot_sinks_state();
+        loop {
+            let child = match Command::new("pactl")
+                .arg("subscribe")
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn()
+            {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("pactl subscribe spawn failed: {e}");
+                    thread::sleep(Duration::from_secs(5));
+                    continue;
+                }
+            };
+            let stdout = match child.stdout {
+                Some(s) => s,
+                None => {
+                    thread::sleep(Duration::from_secs(5));
+                    continue;
+                }
+            };
+            let reader = BufReader::new(stdout);
+            for line in reader.lines().map_while(Result::ok) {
+                if line.contains("on source") || line.contains("on sink") {
+                    let now_sources = snapshot_sources_state();
+                    for (name, &(vol, muted)) in &now_sources {
+                        match last_sources.get(name) {
+                            Some(&(prev_vol, prev_muted)) => {
+                                if prev_muted != muted {
+                                    emit_source_mute(&app, name, muted);
+                                }
+                                if prev_vol != vol {
+                                    emit_source_volume(&app, name, vol);
+                                }
+                            }
+                            None => {
+                                emit_source_mute(&app, name, muted);
+                                emit_source_volume(&app, name, vol);
+                            }
+                        }
+                    }
+                    last_sources = now_sources;
+
+                    let now_sinks = snapshot_sinks_state();
+                    for (name, &(vol, muted)) in &now_sinks {
+                        match last_sinks.get(name) {
+                            Some(&(prev_vol, prev_muted)) => {
+                                if prev_muted != muted {
+                                    emit_sink_mute(&app, name, muted);
+                                }
+                                if prev_vol != vol {
+                                    emit_sink_volume(&app, name, vol);
+                                }
+                            }
+                            None => {
+                                emit_sink_mute(&app, name, muted);
+                                emit_sink_volume(&app, name, vol);
+                            }
+                        }
+                    }
+                    last_sinks = now_sinks;
+                }
+            }
+            thread::sleep(Duration::from_secs(2));
+        }
+    });
 }
 
 #[tauri::command]
@@ -1001,15 +1858,20 @@ fn list_card_controls(card: u32) -> Vec<CardControl> {
 }
 
 #[tauri::command]
-fn set_card_control_volume(card: u32, name: String, pct: u32) {
-    let _ = Command::new("amixer")
+fn set_card_control_volume(app: AppHandle, card: u32, name: String, pct: u32) {
+    let ok = Command::new("amixer")
         .args(["-c", &card.to_string(), "-M", "sset", &name, &format!("{}%", pct)])
-        .status();
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if ok {
+        emit_card_control_volume(&app, card, &name, pct);
+    }
 }
 
 #[tauri::command]
-fn set_card_control_mute(card: u32, name: String, muted: bool) {
-    let _ = Command::new("amixer")
+fn set_card_control_mute(app: AppHandle, card: u32, name: String, muted: bool) {
+    let ok = Command::new("amixer")
         .args([
             "-c",
             &card.to_string(),
@@ -1017,7 +1879,15 @@ fn set_card_control_mute(card: u32, name: String, muted: bool) {
             &name,
             if muted { "off" } else { "on" },
         ])
-        .status();
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if ok {
+        let _ = app.emit(
+            "tideline:card_control_mute_changed",
+            serde_json::json!({ "card": card, "name": name, "muted": muted }),
+        );
+    }
 }
 
 #[tauri::command]
@@ -1033,7 +1903,7 @@ fn set_mix_enabled(id: String, enabled: bool, app: AppHandle, state: State<'_, A
     let mut map = mix_enabled_with_defaults(&state.mix_enabled.lock().unwrap(), &cfg.mixes);
     map.insert(id, enabled);
     write_mix_enabled(&map);
-    apply_mix_enabled(&map, &cfg);
+    apply_mix_enabled(&app, &map, &cfg);
     *state.mix_enabled.lock().unwrap() = map;
     refresh_tray_menu(&app);
 }
@@ -1048,22 +1918,31 @@ fn channel_mute(app: &AppHandle, channel: &str) {
     if ch.kind == ChannelKind::PhysicalInput {
         if ch.physical_source.is_empty() { return; }
         let cur = get_source_state(ch.physical_source.clone()).map(|(_, m)| m).unwrap_or(false);
-        pactl(&["set-source-mute", &ch.physical_source, if !cur { "1" } else { "0" }]);
+        let next = !cur;
+        if pactl_check(&["set-source-mute", &ch.physical_source, if next { "1" } else { "0" }]) {
+            emit_source_mute(app, &ch.physical_source, next);
+        }
     } else {
         let sink = sink_node_for_channel(ch);
         let cur = get_sink_state(sink.clone()).map(|(_, m)| m).unwrap_or(false);
-        pactl(&["set-sink-mute", &sink, if !cur { "1" } else { "0" }]);
+        let next = !cur;
+        if pactl_check(&["set-sink-mute", &sink, if next { "1" } else { "0" }]) {
+            emit_sink_mute(app, &sink, next);
+        }
     }
 }
 
-fn output_mute(sink: &str) {
+fn output_mute(app: &AppHandle, sink: &str) {
     let cur = get_sink_state(sink.to_string()).map(|(_, m)| m).unwrap_or(false);
-    pactl(&["set-sink-mute", sink, if !cur { "1" } else { "0" }]);
+    let next = !cur;
+    if pactl_check(&["set-sink-mute", sink, if next { "1" } else { "0" }]) {
+        emit_sink_mute(app, sink, next);
+    }
 }
 
 fn execute_keybind(app: &AppHandle, action: &KeybindAction) {
     match action {
-        KeybindAction::ToggleOutputMute { sink } => output_mute(sink),
+        KeybindAction::ToggleOutputMute { sink } => output_mute(app, sink),
         KeybindAction::ToggleChannelMute { channel } => channel_mute(app, channel),
         KeybindAction::ToggleMixEnabled { mix_id } => {
             let state = app.state::<AppState>();
@@ -1072,7 +1951,7 @@ fn execute_keybind(app: &AppHandle, action: &KeybindAction) {
             let next = !*map.get(mix_id).unwrap_or(&true);
             map.insert(mix_id.clone(), next);
             write_mix_enabled(&map);
-            apply_mix_enabled(&map, &cfg);
+            apply_mix_enabled(app, &map, &cfg);
             *state.mix_enabled.lock().unwrap() = map;
             refresh_tray_menu(app);
         }
@@ -1146,20 +2025,26 @@ fn get_config(state: State<'_, AppState>) -> AppConfig {
 }
 
 #[tauri::command]
-fn save_config(config: AppConfig, app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
+async fn save_config(config: AppConfig, app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
     save_config_to_disk(&config)?;
+
+    let registry = app
+        .state::<Arc<tideline_host::PluginRegistry>>()
+        .inner()
+        .clone();
 
     let old = state.config.lock().unwrap().clone();
 
     let msg = if let Some(added) = try_soft_apply(&old, &config) {
+        let mix_mutes = build_mix_mutes(&config);
         let contributions: Vec<Vec<tideline_core::pipewire::directive::PipewireDirective>> =
             tideline_host::contribute::resolve_collisions(
-                tideline_host::contribute::collect_pipewire_contributions(&config),
+                tideline_host::contribute::collect_pipewire_contributions(&registry, &config, &mix_mutes).await,
             )
             .into_iter()
             .map(|c| c.directives)
             .collect();
-        let backed_up = write_pipewire_conf_with_contributions(&config, &contributions)?;
+        let backed_up = write_pipewire_conf_with_contributions(&config, &contributions, &mix_mutes)?;
         let mut soft_failed: Option<String> = None;
         for ch in &added {
             if let Err(e) = load_channel_modules(&config, ch) {
@@ -1181,7 +2066,7 @@ fn save_config(config: AppConfig, app: AppHandle, state: State<'_, AppState>) ->
         }
         if let Some(err) = soft_failed {
             eprintln!("soft apply failed ({}); falling back to restart", err);
-            restart_pipewire_stack();
+            restart_pipewire_stack(&registry).await;
             let mut m = String::from("Applied. Audio engine restarted (soft apply failed).");
             if !backed_up.is_empty() {
                 m.push_str(&format!(" Legacy files backed up: {}", backed_up.join(", ")));
@@ -1200,11 +2085,11 @@ fn save_config(config: AppConfig, app: AppHandle, state: State<'_, AppState>) ->
             m
         }
     } else {
-        write_pipewire_and_restart(&config)?
+        write_pipewire_and_restart(&config, &registry).await?
     };
 
     *state.config.lock().unwrap() = config.clone();
-    reapply_mix_enabled_state(&state);
+    reapply_mix_enabled_state(&app, &state);
     refresh_tray_menu(&app);
     register_all_keybinds(&app);
     Ok(msg)
@@ -1287,6 +2172,32 @@ fn window_hide(window: tauri::Window) -> Result<(), String> {
 #[tauri::command]
 fn window_drag(window: tauri::Window) -> Result<(), String> {
     window.start_dragging().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn open_plugin_window(
+    app: AppHandle,
+    plugin_id: String,
+    surface_id: String,
+    title: Option<String>,
+    width: Option<f64>,
+    height: Option<f64>,
+) -> Result<(), String> {
+    let label = format!("plugin-{}-{}", plugin_id, surface_id);
+    if let Some(existing) = app.get_webview_window(&label) {
+        let _ = existing.show();
+        let _ = existing.set_focus();
+        return Ok(());
+    }
+    let url_str = format!("tideline-plugin://{}/{}/", plugin_id, surface_id);
+    let parsed = tauri::Url::parse(&url_str).map_err(|e| e.to_string())?;
+    let win_title = title.unwrap_or_else(|| format!("{} – {}", plugin_id, surface_id));
+    tauri::WebviewWindowBuilder::new(&app, &label, tauri::WebviewUrl::CustomProtocol(parsed))
+        .title(win_title)
+        .inner_size(width.unwrap_or(800.0), height.unwrap_or(600.0))
+        .build()
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[derive(Default)]
@@ -1451,15 +2362,19 @@ pub fn run() {
             let _ = INITIAL_BACKEND.set(backend);
 
             app.manage(Arc::new(LevelMonitor::new(app.handle().clone())));
+            spawn_audio_state_watcher(app.handle().clone());
             routing::spawn(app.handle().clone());
             register_all_keybinds(app.handle());
 
             let plugin_registry = Arc::new(tideline_host::PluginRegistry::new());
             {
                 let registry = plugin_registry.clone();
+                let app_for_backend = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
                     registry
-                        .set_backend(std::sync::Arc::new(plugins::backend::TauriHostBackend))
+                        .set_backend(std::sync::Arc::new(
+                            plugins::backend::TauriHostBackend::new(app_for_backend),
+                        ))
                         .await;
                 });
             }
@@ -1479,9 +2394,71 @@ pub fn run() {
                 }
             });
             plugins::spawn_contributions_relay(app.handle(), plugin_registry.clone());
+            plugins::spawn_plugin_events_relay(app.handle(), plugin_registry.clone());
+
+            // When a plugin's pipewire-relevant state changes (e.g.
+            // tideline-effects' rack updates), re-collect contributions and
+            // rewrite the pipewire conf. Multiple call sites (event-bus
+            // rack_changed, direct attach_channel_data) feed a single
+            // debounced trigger so we never double-restart on rapid edits.
+            let pw_trigger = PipewireRebuildTrigger::new();
+            app.manage(pw_trigger.clone());
+            {
+                let trigger = pw_trigger.clone();
+                let mut rx = plugin_registry.subscribe_plugin_events();
+                tauri::async_runtime::spawn(async move {
+                    loop {
+                        match rx.recv().await {
+                            Ok(event) => {
+                                if event.topic != "tideline-effects:rack_changed" {
+                                    continue;
+                                }
+                                eprintln!("[pipewire] rack_changed observed — poking rebuild trigger");
+                                trigger.poke();
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                            Err(_) => break,
+                        }
+                    }
+                });
+            }
+            {
+                let registry = plugin_registry.clone();
+                let app_for_rebuild = app.handle().clone();
+                let trigger = pw_trigger.clone();
+                tauri::async_runtime::spawn(async move {
+                    loop {
+                        trigger.notify.notified().await;
+                        // Debounce: wait briefly, then drain any further pokes
+                        // queued during the wait into this single rebuild.
+                        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                        let cfg = match app_for_rebuild.try_state::<AppState>() {
+                            Some(s) => s.config.lock().unwrap().clone(),
+                            None => continue,
+                        };
+                        eprintln!("[pipewire] rebuild worker firing write_pipewire_and_restart");
+                        match write_pipewire_and_restart(&cfg, &registry).await {
+                            Ok(msg) => eprintln!("[pipewire] rebuild ok — {msg}"),
+                            Err(e) => eprintln!("[pipewire] rebuild failed: {e}"),
+                        }
+                        // Sink-inputs come back up over the next second or
+                        // two as apps reconnect; mute is per-sink-input so a
+                        // single reapply may miss late arrivals. Hammer it
+                        // a few times to catch them.
+                        let app_for_mute = app_for_rebuild.clone();
+                        tauri::async_runtime::spawn(async move {
+                            for delay_ms in [400u64, 1200, 2500, 5000] {
+                                tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+                                reapply_all_channel_volumes_and_mutes(&app_for_mute);
+                            }
+                        });
+                    }
+                });
+            }
 
             {
                 let registry = plugin_registry.clone();
+                let app_for_pw = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
                     if std::env::var_os("TIDELINE_DEV_PLUGINS_DIR").is_none() {
                         let mut found_dev = false;
@@ -1542,6 +2519,20 @@ pub fn run() {
                             Err(e) => eprintln!("plugins: start {id} failed: {e}"),
                         }
                     }
+
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+                    let cfg = match app_for_pw.try_state::<AppState>() {
+                        Some(s) => s.config.lock().unwrap().clone(),
+                        None => {
+                            eprintln!("plugins: AppState missing, skipping startup pipewire collect");
+                            return;
+                        }
+                    };
+                    match write_pipewire_and_restart(&cfg, &registry).await {
+                        Ok(msg) => eprintln!("plugins: startup pipewire write -- {msg}"),
+                        Err(e) => eprintln!("plugins: startup pipewire write failed: {e}"),
+                    }
                 });
             }
 
@@ -1569,13 +2560,14 @@ pub fn run() {
             }
 
             let cfg_for_vols = cfg.clone();
+            let app_for_vols = app.handle().clone();
             thread::spawn(move || {
                 thread::sleep(Duration::from_millis(900));
                 let all_vols = read_all_volumes();
                 let mix_ids: Vec<String> = cfg_for_vols.mixes.iter().map(|m| m.id.clone()).collect();
                 for ch in &cfg_for_vols.channels {
                     if let Some(vols) = all_vols.get(&ch.name) {
-                        apply_channel_volumes(&slug(&ch.name), vols, &mix_ids);
+                        apply_channel_volumes(&app_for_vols, &slug(&ch.name), vols, &mix_ids);
                     }
                 }
             });
@@ -1615,7 +2607,7 @@ pub fn run() {
                             let next = !*map.get(&mix_id).unwrap_or(&true);
                             map.insert(mix_id, next);
                             write_mix_enabled(&map);
-                            apply_mix_enabled(&map, &cfg);
+                            apply_mix_enabled(app, &map, &cfg);
                             *state.mix_enabled.lock().unwrap() = map;
                             refresh_tray_menu(app);
                         }
@@ -1693,14 +2685,19 @@ pub fn run() {
             window_minimize,
             window_hide,
             window_drag,
+            open_plugin_window,
             ensure_audio_backend_cmd,
             get_initial_backend_status,
             get_all_channel_volumes,
             set_channel_master_volume,
             set_channel_mix_volume,
+            set_channel_master_mute,
+            set_channel_mix_mute,
             plugins::tideline_plugin_iframe_send,
             plugins::tideline_plugin_contributions,
             plugins::tideline_plugin_emit_event,
+            plugins::tideline_plugin_request,
+            plugins::tideline_plugin_replay_states,
             plugins::tideline_plugin_request_permission,
         ])
         .run(tauri::generate_context!())

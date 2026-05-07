@@ -274,7 +274,6 @@ fn device_loop(path: &Path, shared: Arc<Shared>) {
 }
 
 fn handle_key_event(shared: &Shared, k: KeyCode, value: i32) {
-    // value: 0 = release, 1 = press, 2 = autorepeat
     if value == 2 {
         return;
     }
@@ -308,23 +307,29 @@ fn handle_key_event(shared: &Shared, k: KeyCode, value: i32) {
     let captured_value = value;
     shared.handle.spawn(async move {
         let cfg = runtime.config.lock().await.clone();
-        let toggle = cfg.mode_toggle_binding.as_ref();
-        let hold = cfg.hold_binding.as_ref();
-
+        eprintln!("PTT: evdev key event observed={:?} value={} enabled_sources={}", observed, captured_value, cfg.enabled_sources.len());
+        let toggle = cfg.mode_toggle_binding.clone();
+        let hold = cfg.hold_binding.clone();
+        let sources = cfg.enabled_sources.clone();
+        drop(cfg);
         if captured_value == 1 {
-            if let Some(t) = toggle {
+            if let Some(t) = toggle.as_ref() {
                 if *t == observed {
-                    runtime.toggle_mode().await;
+                    for src in &sources {
+                        runtime.toggle_mode(src).await;
+                    }
                     return;
                 }
             }
-            if let Some(h) = hold {
+            if let Some(h) = hold.as_ref() {
                 if *h == observed {
-                    runtime.hold_press().await;
+                    for src in &sources {
+                        runtime.hold_press(src).await;
+                    }
                 }
             }
         } else if captured_value == 0 {
-            if let Some(h) = hold {
+            if let Some(h) = hold.as_ref() {
                 let key_match = match (h, &observed) {
                     (Binding::Keyboard { key: hk, .. }, Binding::Keyboard { key: ok, .. }) => {
                         hk == ok
@@ -335,7 +340,9 @@ fn handle_key_event(shared: &Shared, k: KeyCode, value: i32) {
                     _ => false,
                 };
                 if key_match {
-                    runtime.hold_release().await;
+                    for src in &sources {
+                        runtime.hold_release(src).await;
+                    }
                 }
             }
         }

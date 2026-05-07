@@ -17,7 +17,7 @@ fn cfg_with_one_mix_and_output_channel() -> AppConfig {
 #[test]
 fn base_topology_emits_load_module_per_loopback() {
     let cfg = cfg_with_one_mix_and_output_channel();
-    let directives = build_base_topology(&cfg);
+    let directives = build_base_topology(&cfg, &[]);
     let load_modules = directives
         .iter()
         .filter(|d| matches!(d, PipewireDirective::LoadModule { .. }))
@@ -31,7 +31,7 @@ fn base_topology_emits_load_module_per_loopback() {
 #[test]
 fn loopbacks_carry_rewireable_tag_when_eligible() {
     let cfg = cfg_with_one_mix_and_output_channel();
-    let directives = build_base_topology(&cfg);
+    let directives = build_base_topology(&cfg, &[]);
     let tagged = directives.iter().any(|d| match d {
         PipewireDirective::LoadModule { rewireable_tag, .. } => rewireable_tag.is_some(),
         _ => false,
@@ -45,7 +45,7 @@ fn directives_serialize_byte_equivalent_to_legacy() {
         &fs::read_to_string(Path::new("tests/fixtures/baseline_input.json")).unwrap(),
     )
     .unwrap();
-    let directives = build_base_topology(&cfg);
+    let directives = build_base_topology(&cfg, &[]);
     let actual = serialize_directives(&directives);
     let expected = fs::read_to_string(Path::new("tests/fixtures/baseline.conf")).unwrap();
     pretty_assertions::assert_eq!(actual, expected);

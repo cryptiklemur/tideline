@@ -87,6 +87,8 @@ pub fn required_capability_for(method: &str) -> Option<Capability> {
             | "host/contributions.unregister_tray_item" => TrayContribute,
         "host/contributions.register_keybind_action"
             | "host/contributions.unregister_keybind_action" => KeybindRegister,
+        "host/contributions.register_input_overlay"
+            | "host/contributions.unregister_input_overlay" => UiInputOverlay,
         "host/pipewire.contribute" => PipewireContribute,
         "host/config.namespace.get" => ConfigNamespaceRead,
         "host/config.namespace.set" => ConfigNamespaceWrite,

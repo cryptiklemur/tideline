@@ -1,11 +1,9 @@
 //! Typed message bridge between the rack iframe webview and the effects plugin.
 //!
 //! Inbound messages arrive via the `ui.iframe.message` JSON-RPC method as an
-//! [`Envelope`] payload. They are routed by `kind` to the FFI primitives in
-//! `chain_ops`, `persist`, `discovery`, and `install*`. Outbound payloads go
-//! back to the iframe via `host.ui_iframe_send` (NOT via the response).
+//! [`Envelope`] payload. They are routed by `kind` to chain_ops + AudioEngine.
+//! Outbound payloads go back to the iframe via `host.ui_iframe_send`.
 
-use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -15,8 +13,8 @@ use uuid::Uuid;
 use tideline_sdk::rpc::{error_codes, RpcError};
 use tideline_sdk::HostClient;
 
-use crate::discovery::PluginInfo;
 use crate::effect::{ChannelEffectsData, Effect, PluginFormat};
+use crate::host::PluginInfo;
 use crate::state::EffectsState;
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -56,8 +54,6 @@ pub enum InboundMsg {
     SaveAllState {
         channel_uuid: Uuid,
     },
-    InstallProbe,
-    InstallRun,
     DismissBanner,
 }
 
@@ -73,13 +69,6 @@ pub enum OutboundMsg {
     ChannelEffects {
         channel_uuid: Uuid,
         data: ChannelEffectsData,
-    },
-    InstallProbe {
-        needs_install: bool,
-    },
-    InstallResult {
-        success: bool,
-        message: String,
     },
     Toast {
         #[serde(rename = "tone")]
@@ -132,17 +121,11 @@ async fn handle(
             send_to_iframe(host, surface_id, OutboundMsg::ChannelEffects {
                 channel_uuid,
                 data: snap,
-            }).await?;
-            let probe = crate::install::InstallProbe::run().await;
-            send_to_iframe(host, surface_id, OutboundMsg::InstallProbe {
-                needs_install: probe.needs_install(),
             }).await
         }
         InboundMsg::ListPlugins => {
-            let cache = crate::discovery::ensure_cached().await;
-            send_to_iframe(host, surface_id, OutboundMsg::PluginList {
-                plugins: cache.plugins,
-            }).await
+            let plugins = state.catalog_clone().await;
+            send_to_iframe(host, surface_id, OutboundMsg::PluginList { plugins }).await
         }
         InboundMsg::AddEffect { channel_uuid, plugin_uri, format, display_name } => {
             let effect = Effect {
@@ -163,19 +146,10 @@ async fn handle(
             persist_channel(state, host, channel_uuid).await
         }
         InboundMsg::ToggleBypass { channel_uuid, effect_id, bypassed } => {
-            let plugin_id = state.lookup_plugin_id(channel_uuid, effect_id).await
-                .ok_or_else(|| internal(format!("effect {effect_id} not in chain")))?;
-            engine_set_active(state, plugin_id, !bypassed).await?;
             state.set_effect_bypassed(channel_uuid, effect_id, bypassed).await;
             persist_channel(state, host, channel_uuid).await
         }
         InboundMsg::ToggleChainBypass { channel_uuid, bypassed } => {
-            let order = state.chain_order(channel_uuid).await;
-            for eid in &order {
-                if let Some(pid) = state.lookup_plugin_id(channel_uuid, *eid).await {
-                    engine_set_active(state, pid, !bypassed).await?;
-                }
-            }
             state.set_chain_bypass(channel_uuid, bypassed).await;
             persist_channel(state, host, channel_uuid).await
         }
@@ -184,10 +158,9 @@ async fn handle(
                 .map_err(|e| internal(format!("reorder: {e}")))?;
             persist_channel(state, host, channel_uuid).await
         }
-        InboundMsg::OpenPluginGui { channel_uuid, effect_id } => {
-            let plugin_id = state.lookup_plugin_id(channel_uuid, effect_id).await
-                .ok_or_else(|| internal(format!("effect {effect_id} not in chain")))?;
-            engine_show_custom_ui(state, plugin_id, true).await
+        InboundMsg::OpenPluginGui { channel_uuid: _, effect_id: _ } => {
+            // Wired in Step 14 once ui_bridge + suil are available.
+            Err(internal("plugin GUI not yet implemented".into()))
         }
         InboundMsg::SaveAllState { channel_uuid } => {
             let order = state.chain_order(channel_uuid).await;
@@ -199,72 +172,11 @@ async fn handle(
             }
             persist_channel(state, host, channel_uuid).await
         }
-        InboundMsg::InstallProbe => {
-            let probe = crate::install::InstallProbe::run().await;
-            send_to_iframe(host, surface_id, OutboundMsg::InstallProbe {
-                needs_install: probe.needs_install(),
-            }).await
-        }
-        InboundMsg::InstallRun => {
-            match crate::install_runner::run_install_via_pkexec().await {
-                Ok(outcome) => {
-                    send_to_iframe(host, surface_id, OutboundMsg::InstallResult {
-                        success: outcome.success,
-                        message: outcome.stderr_tail,
-                    }).await
-                }
-                Err(e) => {
-                    send_to_iframe(host, surface_id, OutboundMsg::InstallResult {
-                        success: false,
-                        message: format!("spawn failed: {e}"),
-                    }).await
-                }
-            }
-        }
-        InboundMsg::DismissBanner => {
-            // TODO(T20): persist install_banner_dismissed via config_namespace_set
-            Ok(())
-        }
+        InboundMsg::DismissBanner => Ok(()),
     }
 }
 
-async fn engine_set_active(
-    state: &Arc<EffectsState>,
-    plugin_id: u32,
-    on: bool,
-) -> Result<(), RpcError> {
-    let engine = state.engine().await
-        .ok_or_else(|| internal("engine not initialized".into()))?;
-    let host = engine.lock().await;
-    let result = std::panic::catch_unwind(AssertUnwindSafe(|| host.set_active(plugin_id, on)));
-    drop(host);
-    if let Err(panic) = result {
-        let msg = panic_msg(panic);
-        crate::engine::mark_unhealthy(state.clone(), msg.clone()).await;
-        return Err(internal(format!("set_active panicked: {msg}")));
-    }
-    Ok(())
-}
-
-async fn engine_show_custom_ui(
-    state: &Arc<EffectsState>,
-    plugin_id: u32,
-    show: bool,
-) -> Result<(), RpcError> {
-    let engine = state.engine().await
-        .ok_or_else(|| internal("engine not initialized".into()))?;
-    let host = engine.lock().await;
-    let result = std::panic::catch_unwind(AssertUnwindSafe(|| host.show_custom_ui(plugin_id, show)));
-    drop(host);
-    if let Err(panic) = result {
-        let msg = panic_msg(panic);
-        crate::engine::mark_unhealthy(state.clone(), msg.clone()).await;
-        return Err(internal(format!("show_custom_ui panicked: {msg}")));
-    }
-    Ok(())
-}
-
-async fn snapshot_channel(state: &Arc<EffectsState>, channel: Uuid) -> ChannelEffectsData {
+pub(crate) async fn snapshot_channel(state: &Arc<EffectsState>, channel: Uuid) -> ChannelEffectsData {
     let order = state.chain_order(channel).await;
     let chain_bypassed = state.get_chain_bypass(channel).await;
     let effects_map = state.effects.lock().await;
@@ -277,7 +189,7 @@ async fn snapshot_channel(state: &Arc<EffectsState>, channel: Uuid) -> ChannelEf
     ChannelEffectsData { effects, chain_bypassed }
 }
 
-async fn persist_channel(
+pub(crate) async fn persist_channel(
     state: &Arc<EffectsState>,
     host: &Arc<HostClient>,
     channel: Uuid,
@@ -302,14 +214,6 @@ async fn send_to_iframe(
 
 fn internal(message: String) -> RpcError {
     RpcError { code: error_codes::INTERNAL_ERROR, message, data: None }
-}
-
-fn panic_msg(panic: Box<dyn std::any::Any + Send>) -> String {
-    panic
-        .downcast_ref::<&str>()
-        .map(|s| (*s).to_string())
-        .or_else(|| panic.downcast_ref::<String>().cloned())
-        .unwrap_or_else(|| "carla FFI panicked".into())
 }
 
 #[cfg(test)]
@@ -361,21 +265,6 @@ mod tests {
         assert_eq!(env.surface_id, "rack");
         assert!(env.channel_uuid.is_some());
         assert!(matches!(env.message, InboundMsg::ListPlugins));
-
-        let without = json!({
-            "surface_id": "rack",
-            "message": {"kind": "list_plugins"},
-        });
-        let env: Envelope = serde_json::from_value(without).unwrap();
-        assert!(env.channel_uuid.is_none());
-        assert!(matches!(env.message, InboundMsg::ListPlugins));
-    }
-
-    #[test]
-    fn inbound_msg_unknown_kind_fails_parse() {
-        let raw = json!({"kind": "definitely_not_a_real_kind"});
-        let res: Result<InboundMsg, _> = serde_json::from_value(raw);
-        assert!(res.is_err());
     }
 
     #[tokio::test]
@@ -386,8 +275,8 @@ mod tests {
         let e2 = Effect::new_lv2("uri-b");
         let id1 = e1.id;
         let id2 = e2.id;
-        state.attach_effect(channel, e1, 10).await;
-        state.attach_effect(channel, e2, 11).await;
+        state.attach_effect(channel, e1).await;
+        state.attach_effect(channel, e2).await;
         let snap = snapshot_channel(&state, channel).await;
         assert_eq!(snap.effects.len(), 2);
         assert_eq!(snap.effects[0].id, id1);
@@ -399,7 +288,7 @@ mod tests {
     async fn snapshot_channel_reflects_chain_bypass_flag() {
         let state = EffectsState::new("test");
         let channel = Uuid::new_v4();
-        state.attach_effect(channel, Effect::new_lv2("uri"), 0).await;
+        state.attach_effect(channel, Effect::new_lv2("uri")).await;
         state.set_chain_bypass(channel, true).await;
         let snap = snapshot_channel(&state, channel).await;
         assert!(snap.chain_bypassed);

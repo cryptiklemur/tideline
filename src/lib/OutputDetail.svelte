@@ -17,8 +17,11 @@ let muted = $state(false);
 let cardId = $state<number | null>(null);
 let cardControls = $state<CardControl[]>([]);
 let cardLoaded = $state(false);
-let cardPollTimer: ReturnType<typeof setInterval> | null = null;
 let lastSinkName = '';
+let muteUnlisten: UnlistenFn | null = null;
+let volUnlisten: UnlistenFn | null = null;
+let cardCtrlVolUnlisten: UnlistenFn | null = null;
+let cardCtrlMuteUnlisten: UnlistenFn | null = null;
 
 const METER_FLOOR_DB = -60;
 const PEAK_HOLD_MS = 1200;
@@ -46,13 +49,6 @@ async function initSink(name: string) {
     cardId = await invoke<number | null>('get_card_for_sink', { sink: name });
     if (cardId !== null) {
         cardControls = await invoke<CardControl[]>('list_card_controls', { card: cardId });
-        if (cardPollTimer) clearInterval(cardPollTimer);
-        cardPollTimer = setInterval(async () => {
-            if (cardId === null) return;
-            try {
-                cardControls = await invoke<CardControl[]>('list_card_controls', { card: cardId });
-            } catch { /* ignore */ }
-        }, 2000);
     } else {
         cardControls = [];
     }
@@ -65,7 +61,6 @@ $effect(() => {
         cardLoaded = false;
         cardId = null;
         cardControls = [];
-        if (cardPollTimer) { clearInterval(cardPollTimer); cardPollTimer = null; }
         initSink(sinkName);
     }
 });
@@ -104,11 +99,41 @@ onMount(async () => {
         rafId = requestAnimationFrame(tick);
     };
     rafId = requestAnimationFrame(tick);
+
+    muteUnlisten = await listen<{ sink_name: string; muted: boolean }>(
+        'tideline:sink_mute_changed',
+        e => { if (e.payload.sink_name === sinkName) muted = e.payload.muted; },
+    );
+    volUnlisten = await listen<{ sink_name: string; volume_pct: number }>(
+        'tideline:sink_volume_changed',
+        e => { if (e.payload.sink_name === sinkName) vol = e.payload.volume_pct; },
+    );
+    cardCtrlVolUnlisten = await listen<{ card: number; name: string; volume_pct: number }>(
+        'tideline:card_control_volume_changed',
+        e => {
+            if (cardId === null || e.payload.card !== cardId) return;
+            cardControls = cardControls.map(c =>
+                c.name === e.payload.name ? { ...c, volume_percent: e.payload.volume_pct } : c
+            );
+        },
+    );
+    cardCtrlMuteUnlisten = await listen<{ card: number; name: string; muted: boolean }>(
+        'tideline:card_control_mute_changed',
+        e => {
+            if (cardId === null || e.payload.card !== cardId) return;
+            cardControls = cardControls.map(c =>
+                c.name === e.payload.name ? { ...c, muted: e.payload.muted } : c
+            );
+        },
+    );
 });
 
 onDestroy(() => {
     if (rafId !== null) cancelAnimationFrame(rafId);
-    if (cardPollTimer !== null) clearInterval(cardPollTimer);
+    muteUnlisten?.();
+    volUnlisten?.();
+    cardCtrlVolUnlisten?.();
+    cardCtrlMuteUnlisten?.();
 });
 
 async function onVolChange(v: number) {

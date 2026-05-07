@@ -2,7 +2,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use base64::Engine;
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
@@ -60,18 +59,21 @@ impl Plugin for TonesPlugin {
         info!(plugin = PLUGIN_ID, "ready");
     }
 
-    async fn on_event(&self, host: Arc<HostClient>, topic: String, params: Value) {
+    async fn on_event(&self, _host: Arc<HostClient>, topic: String, params: Value) {
+        eprintln!("TONES: on_event topic={} params={}", topic, params);
         if topic != TOPIC_PTT_STATE {
             return;
         }
         let cfg_now = self.cfg.lock().await.clone();
         if !cfg_now.enabled {
+            eprintln!("TONES: bail - disabled");
             return;
         }
         let Some(tone) = params.get("play_tone").and_then(|t| t.as_str()) else {
+            eprintln!("TONES: bail - no play_tone field");
             return;
         };
-        let wav: &[u8] = match tone {
+        let wav: &'static [u8] = match tone {
             "up" => MIC_UNMUTE_WAV,
             "down" => MIC_MUTE_WAV,
             other => {
@@ -82,13 +84,62 @@ impl Plugin for TonesPlugin {
         let now_ms = now_millis();
         let prev = self.last_played_ms.swap(now_ms, Ordering::SeqCst);
         if now_ms.saturating_sub(prev) < DEBOUNCE_MS {
+            eprintln!("TONES: bail - debounce");
             return;
         }
-        let wav_b64 = base64::engine::general_purpose::STANDARD.encode(wav);
-        if let Err(e) = host.audio_play_b64(&wav_b64).await {
-            error!(?e, tone, "host/audio.play failed");
-        }
-        let _ = cfg_now.volume_scalar();
+        let volume = cfg_now.volume_scalar();
+        eprintln!("TONES: playing tone={} volume={}", tone, volume);
+        let tone_label = tone.to_string();
+        tokio::spawn(async move {
+            use tokio::io::AsyncWriteExt;
+            use tokio::process::Command;
+            // sox applies a 5ms fade-in / 50ms fade-out so the wav doesn't end
+            // on a non-zero sample (which paplay's stream tear-down turns into
+            // a sharp click). paplay routes through the pulse/pipewire default
+            // sink with media.role=event so notification sounds follow system
+            // routing rules instead of getting locked to whatever device a
+            // direct ALSA path would grab.
+            let pa_volume = (volume.clamp(0.0, 1.0) * 65536.0).round() as u32;
+            let cmd = format!(
+                "sox - -t wav - fade t 0.005 0 0.05 | paplay --volume={} --property=media.role=event --client-name=tideline-tones",
+                pa_volume
+            );
+            let mut child = match Command::new("sh")
+                .arg("-c")
+                .arg(&cmd)
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+            {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("TONES: tone pipeline spawn failed tone={} err={:?}", tone_label, e);
+                    return;
+                }
+            };
+            if let Some(mut stdin) = child.stdin.take() {
+                if let Err(e) = stdin.write_all(wav).await {
+                    eprintln!("TONES: pipeline write failed tone={} err={:?}", tone_label, e);
+                    return;
+                }
+                drop(stdin);
+            }
+            match child.wait_with_output().await {
+                Ok(out) if !out.status.success() => {
+                    eprintln!(
+                        "TONES: tone pipeline exited non-zero tone={} status={:?} stderr={}",
+                        tone_label,
+                        out.status,
+                        String::from_utf8_lossy(&out.stderr)
+                    );
+                }
+                Err(e) => {
+                    eprintln!("TONES: tone pipeline wait failed tone={} err={:?}", tone_label, e);
+                }
+                _ => {}
+            }
+        });
     }
 
     async fn on_request(

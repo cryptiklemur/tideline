@@ -28,14 +28,15 @@ pub fn sink_node_for_channel(ch: &ChannelCfg) -> String {
         .unwrap_or_else(|| format!("sink.{}", slug(&ch.name)))
 }
 
-/// Two-phase pipeline: build base topology, fold each contribution batch in
-/// order, then serialize. An empty `contributions` slice yields the base
-/// topology unchanged (byte-equivalent to the pre-plugin generator).
+/// Two-phase pipeline: build base topology (filtered by per-mix mute),
+/// fold each contribution batch in order, then serialize. An empty
+/// `contributions` slice yields the base topology unchanged.
 pub fn build_pipewire_conf(
     cfg: &AppConfig,
     contributions: &[Vec<directive::PipewireDirective>],
+    mix_mutes: &[directive::MixMuteEntry],
 ) -> String {
-    let mut directives = topology::build_base_topology(cfg);
+    let mut directives = topology::build_base_topology(cfg, mix_mutes);
     for batch in contributions {
         directives = contribute::apply_contribution(directives, batch);
     }
@@ -50,7 +51,7 @@ pub fn generate_pipewire_config(cfg: &AppConfig) -> Result<String, String> {
         return Err("At least one channel is required.".into());
     }
 
-    Ok(build_pipewire_conf(cfg, &[]))
+    Ok(build_pipewire_conf(cfg, &[], &[]))
 }
 
 pub fn generate_app_routing_config(cfg: &AppConfig) -> String {
@@ -87,12 +88,13 @@ pub fn write_app_routing(cfg: &AppConfig) -> Result<(), String> {
 }
 
 pub fn write_pipewire_conf(cfg: &AppConfig) -> Result<Vec<String>, String> {
-    write_pipewire_conf_with_contributions(cfg, &[])
+    write_pipewire_conf_with_contributions(cfg, &[], &[])
 }
 
 pub fn write_pipewire_conf_with_contributions(
     cfg: &AppConfig,
     contributions: &[Vec<directive::PipewireDirective>],
+    mix_mutes: &[directive::MixMuteEntry],
 ) -> Result<Vec<String>, String> {
     if cfg.mixes.is_empty() {
         return Err("At least one mix is required. Open the Mixes view and add one.".into());
@@ -100,7 +102,7 @@ pub fn write_pipewire_conf_with_contributions(
     if cfg.channels.is_empty() {
         return Err("At least one channel is required.".into());
     }
-    let body = build_pipewire_conf(cfg, contributions);
+    let body = build_pipewire_conf(cfg, contributions, mix_mutes);
 
     let dir = pipewire_conf_dir();
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;

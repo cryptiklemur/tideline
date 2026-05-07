@@ -25,6 +25,7 @@ const PLUGIN_ID: &str = "tideline-ptt";
 const VERSION: &str = "0.1.0";
 const SDK_VERSION: &str = "1.0";
 const SECTION_ID: &str = "tideline-ptt";
+const INPUT_OVERLAY_ID: &str = "tideline-ptt-input";
 
 struct PttPlugin {
     runtime: Arc<PttRuntime>,
@@ -33,6 +34,7 @@ struct PttPlugin {
 #[async_trait]
 impl Plugin for PttPlugin {
     async fn on_ready(&self, host: Arc<HostClient>) {
+        eprintln!("PTT on_ready called!");
         self.runtime.set_host(host.clone());
 
         if let Err(e) = host.initialize(PLUGIN_ID, VERSION, SDK_VERSION).await {
@@ -53,20 +55,41 @@ impl Plugin for PttPlugin {
             warn!(?e, "register_settings_section failed");
         }
 
+if let Err(e) = push_input_overlay(&host, &PluginConfig::default()).await {
+            warn!(?e, "register_input_overlay failed");
+        }
+
         match host.config_namespace_get(PLUGIN_ID).await {
             Ok(v) => {
+                eprintln!("PTT: config loaded raw={}", v);
                 let cfg = PluginConfig::from_value(&v);
+                eprintln!("PTT: config parsed enabled_sources={:?} mode_by_source={:?}", cfg.enabled_sources, cfg.mode_by_source);
                 *self.runtime.config.lock().await = cfg.clone();
-                let mut state = self.runtime.state.lock().await;
-                state.mode = cfg.mode;
-                state.hold_active = false;
+                let mut state_map = self.runtime.state_by_source.lock().await;
+                state_map.clear();
+                for src in &cfg.enabled_sources {
+                    let mode = cfg.mode_for(src);
+                    eprintln!("PTT: init state source={} mode={:?}", src, mode);
+                    state_map.insert(
+                        src.clone(),
+                        crate::state::PerSourceState {
+                            mode,
+                            hold_active: false,
+                        },
+                    );
+                }
             }
-            Err(e) => warn!(?e, "config_namespace_get failed; using defaults"),
+            Err(e) => {
+                eprintln!("PTT: config_namespace_get FAILED err={:?}", e);
+                warn!(?e, "config_namespace_get failed; using defaults");
+            }
         }
 
         let runtime = self.runtime.clone();
         let host_for_tree = host.clone();
+        eprintln!("PTT: spawning tree render task");
         tokio::spawn(async move {
+            eprintln!("PTT: tree render task started");
             let portal_result = tokio::time::timeout(
                 Duration::from_secs(3),
                 portal_listener::try_start(runtime.clone()),
@@ -88,18 +111,36 @@ impl Plugin for PttPlugin {
                     runtime.set_capture_method(CaptureMethod::Evdev).await;
                 }
             }
+            eprintln!("PTT: about to call settings_section_render");
             let cm = *runtime.capture_method.lock().await;
             let cfg = runtime.config.lock().await.clone();
             let err = runtime.error.lock().await.clone();
+            let sources = host_for_tree.list_input_sources().await.unwrap_or_default();
             if let Err(e) = host_for_tree.settings_section_render(
                 SECTION_ID,
-                ui::settings_section(&cfg, cm, err.as_deref()),
+                ui::settings_section(&cfg, cm, err.as_deref(), &sources),
             ).await {
                 warn!(?e, "initial settings_section_render failed");
             }
+            if let Err(e) = push_input_overlay(&host_for_tree, &cfg).await {
+                warn!(?e, "initial input overlay re-register failed");
+            }
+            runtime.publish_all_states().await;
+            eprintln!("PTT: settings_section_render completed");
         });
 
+        if let Err(e) = host.event_subscribe("host:pipewire_restarted").await {
+            warn!(?e, "event_subscribe(host:pipewire_restarted) failed");
+        }
+
         info!(plugin = PLUGIN_ID, "ready");
+    }
+
+    async fn on_event(&self, _host: Arc<HostClient>, topic: String, _params: Value) {
+        if topic == "host:pipewire_restarted" {
+            tracing::info!("PTT: pipewire restarted, reapplying mutes");
+            self.runtime.reapply_all_mutes().await;
+        }
     }
 
     async fn on_notification(&self, _host: Arc<HostClient>, method: String, params: Option<Value>) {
@@ -108,11 +149,24 @@ impl Plugin for PttPlugin {
         }
         let p = params.unwrap_or(Value::Null);
         let action_id = p.get("action_id").and_then(|v| v.as_str()).unwrap_or("");
-        match action_id {
-            "toggle_mode" => self.runtime.toggle_mode().await,
-            "hold_press" => self.runtime.hold_press().await,
-            "hold_release" => self.runtime.hold_release().await,
-            other => warn!(action_id = other, "unknown keybind action"),
+        let (op, source) = match action_id.split_once(':') {
+            Some((op, src)) => (op, Some(src.to_string())),
+            None => (action_id, None),
+        };
+        let sources: Vec<String> = match source {
+            Some(s) => vec![s],
+            None => self.runtime.config.lock().await.enabled_sources.clone(),
+        };
+        for src in sources {
+            match op {
+                "toggle_mode" => self.runtime.toggle_mode(&src).await,
+                "hold_press" => self.runtime.hold_press(&src).await,
+                "hold_release" => self.runtime.hold_release(&src).await,
+                other => {
+                    warn!(action_id = other, "unknown keybind action");
+                    break;
+                }
+            }
         }
     }
 
@@ -123,7 +177,7 @@ impl Plugin for PttPlugin {
         params: Option<Value>,
     ) -> Result<Value, RpcError> {
         match method.as_str() {
-            "settings.section.render" => self.handle_render(params).await,
+            "settings.section.render" => self.handle_render(host, params).await,
             "settings.section.event" => self.handle_event(host, params).await,
             other => Err(RpcError {
                 code: error_codes::METHOD_NOT_FOUND,
@@ -135,7 +189,7 @@ impl Plugin for PttPlugin {
 }
 
 impl PttPlugin {
-    async fn handle_render(&self, params: Option<Value>) -> Result<Value, RpcError> {
+    async fn handle_render(&self, host: Arc<HostClient>, params: Option<Value>) -> Result<Value, RpcError> {
         let section_id = params
             .as_ref()
             .and_then(|v| v.get("section_id"))
@@ -151,7 +205,8 @@ impl PttPlugin {
         let cfg = self.runtime.config.lock().await.clone();
         let cm = *self.runtime.capture_method.lock().await;
         let err = self.runtime.error.lock().await.clone();
-        Ok(ui::settings_section(&cfg, cm, err.as_deref()))
+        let sources = host.list_input_sources().await.unwrap_or_default();
+        Ok(ui::settings_section(&cfg, cm, err.as_deref(), &sources))
     }
 
     async fn handle_event(
@@ -161,7 +216,7 @@ impl PttPlugin {
     ) -> Result<Value, RpcError> {
         let p = params.unwrap_or(Value::Null);
         let section_id = p.get("section_id").and_then(|v| v.as_str()).unwrap_or("");
-        if section_id != SECTION_ID {
+        if section_id != SECTION_ID && section_id != INPUT_OVERLAY_ID {
             return Err(RpcError {
                 code: error_codes::INVALID_PARAMS,
                 message: format!("unknown section_id {section_id}"),
@@ -174,48 +229,111 @@ impl PttPlugin {
             .unwrap_or("")
             .to_string();
         let value = p.get("value").cloned().unwrap_or(Value::Null);
+        let context_source = p
+            .get("context")
+            .and_then(|c| c.get("source_name"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
 
         match event_id.as_str() {
             "tideline-ptt:toggle_mode" => {
-                self.runtime.toggle_mode().await;
+                let sources: Vec<String> = match context_source.clone() {
+                    Some(s) => vec![s],
+                    None => self.runtime.config.lock().await.enabled_sources.clone(),
+                };
+                for src in sources {
+                    self.runtime.toggle_mode(&src).await;
+                }
             }
-            "tideline-ptt:set_input_device" => {
-                if let Some(node) = value.as_str() {
-                    let mut cfg = self.runtime.config.lock().await;
-                    cfg.input_device = Some(node.to_string());
-                    let snap = cfg.clone();
-                    drop(cfg);
-                    if let Err(e) = config::save(&host, PLUGIN_ID, &snap).await {
-                        error!(?e, "config save failed");
-                    }
+            "tideline-ptt:input_enabled" => {
+                let Some(source_name) = context_source.clone() else {
+                    warn!("input_enabled event missing context.source_name");
+                    return Ok(json!({}));
+                };
+                let enabled = value.as_bool().unwrap_or(false);
+                let mut cfg = self.runtime.config.lock().await;
+                let already = cfg.enabled_sources.iter().any(|s| s == &source_name);
+                if enabled && !already {
+                    cfg.enabled_sources.push(source_name.clone());
+                } else if !enabled {
+                    cfg.enabled_sources.retain(|s| s != &source_name);
+                    cfg.mode_by_source.remove(&source_name);
+                }
+                let snap = cfg.clone();
+                drop(cfg);
+                if let Err(e) = config::save(&host, PLUGIN_ID, &snap).await {
+                    error!(?e, "config save failed");
+                }
+                if !enabled {
+                    self.runtime
+                        .state_by_source
+                        .lock()
+                        .await
+                        .remove(&source_name);
+                }
+                if let Err(e) = push_input_overlay(&host, &snap).await {
+                    warn!(?e, "re-register input overlay failed");
+                }
+                let cm = *self.runtime.capture_method.lock().await;
+                let err_now = self.runtime.error.lock().await.clone();
+                let sources = host.list_input_sources().await.unwrap_or_default();
+                if let Err(e) = host
+                    .settings_section_render(
+                        SECTION_ID,
+                        ui::settings_section(&snap, cm, err_now.as_deref(), &sources),
+                    )
+                    .await
+                {
+                    warn!(?e, "settings re-render after toggle failed");
                 }
             }
             "tideline-ptt:set_mode_toggle_binding" | "tideline-ptt:set_hold_binding" => {
-                if let Some(s) = value.as_str() {
+                let parsed: Option<Binding> = if value.is_null() {
+                    None
+                } else if let Some(s) = value.as_str() {
                     match Binding::parse(s) {
-                        Ok(b) => {
-                            let mut cfg = self.runtime.config.lock().await;
-                            if event_id.ends_with("mode_toggle_binding") {
-                                cfg.mode_toggle_binding = Some(b);
-                            } else {
-                                cfg.hold_binding = Some(b);
-                            }
-                            let snap = cfg.clone();
-                            drop(cfg);
-                            if let Err(e) = config::save(&host, PLUGIN_ID, &snap).await {
-                                error!(?e, "config save failed");
-                            }
+                        Ok(b) => Some(b),
+                        Err(e) => {
+                            warn!(input = s, error = %e, "failed to parse binding string");
+                            return Ok(json!({}));
                         }
-                        Err(err) => warn!(input = s, error = %err, "failed to parse binding"),
                     }
+                } else {
+                    match serde_json::from_value::<Binding>(value.clone()) {
+                        Ok(b) => Some(b),
+                        Err(e) => {
+                            warn!(?value, error = %e, "failed to deserialize binding");
+                            return Ok(json!({}));
+                        }
+                    }
+                };
+                let mut cfg = self.runtime.config.lock().await;
+                let is_mode_toggle = event_id.ends_with("mode_toggle_binding");
+                if is_mode_toggle {
+                    cfg.mode_toggle_binding = parsed;
+                } else {
+                    cfg.hold_binding = parsed;
                 }
-            }
-            "tideline-ptt:list_sources" => {
-                let v = host
-                    .call_raw("host/sources.list", Some(json!({})), Duration::from_secs(5))
+                let snap = cfg.clone();
+                drop(cfg);
+                if let Err(e) = config::save(&host, PLUGIN_ID, &snap).await {
+                    error!(?e, "config save failed");
+                }
+                if let Err(e) = push_input_overlay(&host, &snap).await {
+                    warn!(?e, "re-register input overlay after binding change failed");
+                }
+                let cm = *self.runtime.capture_method.lock().await;
+                let err_now = self.runtime.error.lock().await.clone();
+                let sources = host.list_input_sources().await.unwrap_or_default();
+                if let Err(e) = host
+                    .settings_section_render(
+                        SECTION_ID,
+                        ui::settings_section(&snap, cm, err_now.as_deref(), &sources),
+                    )
                     .await
-                    .unwrap_or(json!([]));
-                return Ok(v);
+                {
+                    warn!(?e, "settings re-render after binding change failed");
+                }
             }
             "tideline-ptt:install_udev_rule" => {
                 if let Err(e) = install_udev_rule().await {
@@ -236,6 +354,37 @@ impl PttPlugin {
         }
         Ok(json!({}))
     }
+}
+
+async fn push_input_overlay(
+    host: &Arc<HostClient>,
+    cfg: &PluginConfig,
+) -> Result<(), tideline_sdk::transport::SdkTransportError> {
+    let mut values_by_source = serde_json::Map::new();
+    for src in &cfg.enabled_sources {
+        let mut per: serde_json::Map<String, Value> = serde_json::Map::new();
+        per.insert("tideline-ptt:input_enabled".into(), Value::Bool(true));
+        values_by_source.insert(src.clone(), Value::Object(per));
+    }
+    host.register_input_overlay(json!({
+        "surface_id": INPUT_OVERLAY_ID,
+        "input_filter": { "kind": "physical_only" },
+        "tree": {
+            "kind": "section",
+            "id": "tideline-ptt-input-overlay",
+            "children": [
+                {
+                    "kind": "toggle",
+                    "id": "tideline-ptt:input_enabled",
+                    "label": "Push to Talk",
+                    "sublabel": "Mute this input until you press the PTT key",
+                    "value": false,
+                }
+            ]
+        },
+        "values_by_source": Value::Object(values_by_source),
+    }))
+    .await
 }
 
 async fn install_udev_rule() -> Result<(), String> {

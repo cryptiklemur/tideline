@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use uuid::Uuid;
 use crate::transport::{SdkTransportError, StdioTransport};
+use crate::types::AudioSource;
 
 /// Abstraction over the JSON-RPC transport so `HostClient` can be unit-tested
 /// without spawning the real stdin/stdout transport.
@@ -83,6 +84,17 @@ impl HostClient {
         ).await.map(|_| ())
     }
 
+
+    pub async fn list_input_sources(&self) -> Result<Vec<AudioSource>, SdkTransportError> {
+        let v = self.transport.call(
+            "host/sources.list",
+            Some(json!({})),
+            Duration::from_secs(5),
+        ).await?;
+        let sources = v.get("sources").cloned().unwrap_or(json!([]));
+        serde_json::from_value(sources).map_err(|e| SdkTransportError::Decode(e.to_string()))
+    }
+
     pub async fn audio_play_b64(&self, audio_b64: &str) -> Result<(), SdkTransportError> {
         self.transport.call(
             "host/audio.play",
@@ -139,6 +151,7 @@ impl HostClient {
     }
 
     pub async fn settings_section_render(&self, section_id: &str, tree: Value) -> Result<(), SdkTransportError> {
+        eprintln!("SDK: settings_section_render called with section_id={}", section_id);
         self.transport.call(
             "plugin/settings.section.render",
             Some(json!({"surface_id": section_id, "tree": tree})),
@@ -276,6 +289,28 @@ impl HostClient {
         self.transport.call(
             "host/contributions.unregister_keybind_action",
             Some(json!({"action_id": action_id})),
+            Duration::from_secs(2),
+        ).await.map(|_| ())
+    }
+
+    /// Register an input overlay UI surface.
+    ///
+    /// `payload` matches `InputOverlayContribution`: `surface_id`,
+    /// `input_filter` (`{"kind": "all"}` / `{"kind": "physical_only"}` /
+    /// `{"kind": "source_names", "names": [...]}`), `tree`. `plugin_id` is
+    /// stamped by the host.
+    pub async fn register_input_overlay(&self, payload: Value) -> Result<(), SdkTransportError> {
+        self.transport.call(
+            "host/contributions.register_input_overlay",
+            Some(payload),
+            Duration::from_secs(2),
+        ).await.map(|_| ())
+    }
+
+    pub async fn unregister_input_overlay(&self, surface_id: &str) -> Result<(), SdkTransportError> {
+        self.transport.call(
+            "host/contributions.unregister_input_overlay",
+            Some(json!({"surface_id": surface_id})),
             Duration::from_secs(2),
         ).await.map(|_| ())
     }

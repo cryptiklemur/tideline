@@ -1,26 +1,24 @@
-#[allow(dead_code)]
-mod carla;
 mod chain_ops;
 #[allow(dead_code)]
 mod effect;
 mod state;
 mod discovery;
-#[allow(dead_code)]
-mod discovery_runner;
 mod engine;
+mod host;
 mod pipewire_contributor;
-#[allow(dead_code)]
-mod install;
-mod install_runner;
-#[allow(dead_code)]
-mod install_script;
 mod iframe_bridge;
 mod overlay_render;
+mod rack;
 #[allow(dead_code)]
 mod persist;
 mod namespace_config;
 #[allow(dead_code)]
 mod util;
+
+#[allow(dead_code)]
+mod suil_sys;
+#[allow(dead_code)]
+mod ui_bridge;
 
 use std::sync::Arc;
 
@@ -94,29 +92,75 @@ impl Plugin for EffectsPlugin {
             warn!(?e, "register_channel_overlay channel_card failed");
         }
 
-        if let Err(e) = engine::start(self.state.clone()).await {
-            error!(error = %e, "engine start failed");
-            let _ = host
-                .event_publish(
-                    "tideline-effects:engine_unhealthy",
-                    serde_json::json!({"reason": e.to_string()}),
-                )
-                .await;
+        let persisted = persist::load_chains_from_disk();
+
+        let mut registry = host::FormatRegistry::new();
+        registry.register(Arc::new(host::lv2::Lv2Format::default()));
+        match engine::AudioEngine::new(Arc::new(registry)) {
+            Ok(engine) => {
+                let engine = Arc::new(engine);
+                self.state.set_engine(engine.clone());
+                engine::spawn_ui_idle_pump(Arc::downgrade(&engine));
+                // Catalog MUST be populated before apply_persisted_chains —
+                // otherwise plugin_info_for returns None for every persisted
+                // effect, add_effect fails, and the user observes "effects
+                // lost on restart" even though chains.json had the data.
+                discovery::run_first_boot(self.state.clone()).await;
+                state::apply_persisted_chains(self.state.clone(), persisted).await;
+                let mut persisted_any = false;
+                for channel in self.state.channels_with_effects().await {
+                    match crate::iframe_bridge::persist_channel(
+                        &self.state,
+                        &host,
+                        channel,
+                    ).await {
+                        Ok(_) => { persisted_any = true; }
+                        Err(e) => warn!(?e, %channel, "startup persist_channel failed"),
+                    }
+                }
+                if persisted_any {
+                    if let Err(e) = host
+                        .event_publish(
+                            "tideline-effects:rack_changed",
+                            serde_json::json!({ "reason": "startup_persist" }),
+                        )
+                        .await
+                    {
+                        warn!(?e, "startup rack_changed publish failed");
+                    }
+                }
+            }
+            Err(e) => {
+                error!(error = %e, "audio engine init failed");
+                let _ = host
+                    .event_publish(
+                        "tideline-effects:engine_unhealthy",
+                        serde_json::json!({"reason": e.to_string()}),
+                    )
+                    .await;
+            }
         }
 
         for topic in &[
-            "host:pipewire_restarting",
-            "host:pipewire_restarted",
             "host:channel_removed",
+            "host:pipewire_restarted",
         ] {
             if let Err(e) = host.event_subscribe(topic).await {
                 warn!(?e, topic, "event_subscribe failed");
             }
         }
 
+        // Periodic auto-save: pull current LV2 state every 10s and persist it.
         let s = self.state.clone();
         tokio::spawn(async move {
-            discovery::run_first_boot(s).await;
+            let mut tick = tokio::time::interval(std::time::Duration::from_secs(10));
+            tick.tick().await; // first tick fires immediately, skip it
+            loop {
+                tick.tick().await;
+                if s.engine().is_some() {
+                    persist::refresh_state_and_save(s.clone()).await;
+                }
+            }
         });
 
         info!(plugin = PLUGIN_ID, "ready");
@@ -138,6 +182,13 @@ impl Plugin for EffectsPlugin {
                 overlay_render::handle_overlay_event(&self.state, host, params).await
             }
             "ui.iframe.message" => iframe_bridge::dispatch(&self.state, host, params).await,
+            "effects.list_catalog" => rack::list_catalog(&self.state, params).await,
+            "effects.persist_now" => {
+                persist::refresh_state_and_save(self.state.clone()).await;
+                Ok(serde_json::json!({ "ok": true }))
+            }
+            "effects.render_rack" => rack::render_rack(&self.state, params).await,
+            "effects.rack_event" => rack::handle_event(&self.state, host, params).await,
             "pipewire.contribute_request" => {
                 pipewire_contributor::respond(&self.state, params).await
             }
@@ -149,11 +200,13 @@ impl Plugin for EffectsPlugin {
         }
     }
 
-    async fn on_event(&self, _host: Arc<HostClient>, topic: String, params: Value) {
+   async fn on_event(&self, _host: Arc<HostClient>, topic: String, params: Value) {
         match topic.as_str() {
-            "host:pipewire_restarting" => engine::on_pipewire_restart_pre(self.state.clone()).await,
-            "host:pipewire_restarted" => engine::on_pipewire_restart_post(self.state.clone()).await,
             "host:channel_removed" => state::on_channel_removed(self.state.clone(), Some(params)).await,
+            "host:pipewire_restarted" => {
+                tracing::info!("pipewire restarted — recreating engine channels");
+                state::recreate_engine_from_state(self.state.clone()).await;
+            }
             other => warn!(topic = other, "unexpected event topic"),
         }
     }
@@ -163,7 +216,10 @@ impl Plugin for EffectsPlugin {
 async fn main() {
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info,tideline_effects=debug")),
+        )
         .init();
 
     let state = state::EffectsState::new(PLUGIN_ID);

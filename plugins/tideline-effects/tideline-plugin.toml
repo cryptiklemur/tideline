@@ -22,6 +22,7 @@ required = [
   "ui.iframe",
   "ui.settings_section",
   "events.publish",
+  "events.subscribe",
 ]
 optional = [
   "process.spawn",
@@ -29,7 +30,7 @@ optional = [
 
 [contributes]
 publishes_topics = [
-  "tideline-effects:rack_state_changed",
+  "tideline-effects:rack_changed",
   "tideline-effects:scan_complete",
   "tideline-effects:engine_unhealthy",
 ]

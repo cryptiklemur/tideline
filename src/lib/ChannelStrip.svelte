@@ -87,10 +87,49 @@ let displayLevel = $state(0);
 let peakHold = $state(0);
 let lastPeakAt = 0;
 let levelUnlisten: UnlistenFn | null = null;
+let muteUnlisten: UnlistenFn | null = null;
+let volUnlisten: UnlistenFn | null = null;
+let sinkInputUnlisten: UnlistenFn | null = null;
+let sinkInputMuteUnlisten: UnlistenFn | null = null;
 let rafId: number | null = null;
 
 onMount(async () => {
     await refresh();
+    if (kind === 'physical_input' && physicalSource) {
+        muteUnlisten = await listen<{ source_name: string; muted: boolean }>(
+            'tideline:source_mute_changed',
+            e => { if (e.payload.source_name === physicalSource) muted = e.payload.muted; },
+        );
+        volUnlisten = await listen<{ source_name: string; volume_pct: number }>(
+            'tideline:source_volume_changed',
+            e => { if (e.payload.source_name === physicalSource) inVol = e.payload.volume_pct; },
+        );
+    } else if ((kind === 'input' || kind === 'output') && sinkName) {
+        muteUnlisten = await listen<{ sink_name: string; muted: boolean }>(
+            'tideline:sink_mute_changed',
+            e => { if (e.payload.sink_name === sinkName) muted = e.payload.muted; },
+        );
+        volUnlisten = await listen<{ sink_name: string; volume_pct: number }>(
+            'tideline:sink_volume_changed',
+            e => { if (e.payload.sink_name === sinkName) inVol = e.payload.volume_pct; },
+        );
+    }
+    if (kind === 'output') {
+        sinkInputUnlisten = await listen<{ index: number; volume_pct: number }>(
+            'tideline:sink_input_volume_changed',
+            e => {
+                if (hpIndex !== null && e.payload.index === hpIndex) hpVol = e.payload.volume_pct;
+                if (spIndex !== null && e.payload.index === spIndex) spVol = e.payload.volume_pct;
+            },
+        );
+        sinkInputMuteUnlisten = await listen<{ index: number; muted: boolean }>(
+            'tideline:sink_input_mute_changed',
+            e => {
+                if (hpIndex !== null && e.payload.index === hpIndex && mode !== 'speakers') muted = e.payload.muted;
+                if (spIndex !== null && e.payload.index === spIndex && mode !== 'headphones') muted = e.payload.muted;
+            },
+        );
+    }
     if (meterSource) {
         const eventName = `level:${meterSource.replace(/\./g, '_')}`;
         levelUnlisten = await listen<{ peak: number; rms: number }>(eventName, e => {
@@ -118,6 +157,10 @@ onMount(async () => {
 
 onDestroy(() => {
     if (levelUnlisten) levelUnlisten();
+    if (muteUnlisten) muteUnlisten();
+    if (volUnlisten) volUnlisten();
+    if (sinkInputUnlisten) sinkInputUnlisten();
+    if (sinkInputMuteUnlisten) sinkInputMuteUnlisten();
     if (rafId !== null) cancelAnimationFrame(rafId);
 });
 

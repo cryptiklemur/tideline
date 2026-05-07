@@ -52,6 +52,8 @@ pub enum Capability {
     UiChannelOverlay,
     #[serde(rename = "ui.iframe")]
     UiIframe,
+    #[serde(rename = "ui.input_overlay")]
+    UiInputOverlay,
 
     #[serde(rename = "tray.contribute")]
     TrayContribute,
@@ -177,6 +179,7 @@ mod tests {
             (Capability::UiStatusPill, "ui.status_pill"),
             (Capability::UiChannelOverlay, "ui.channel_overlay"),
             (Capability::UiIframe, "ui.iframe"),
+            (Capability::UiInputOverlay, "ui.input_overlay"),
             (Capability::TrayContribute, "tray.contribute"),
             (Capability::KeybindRegister, "keybind.register"),
             (Capability::PortalGlobalShortcuts, "portal.global_shortcuts"),
@@ -191,7 +194,7 @@ mod tests {
             (Capability::LogWrite, "log.write"),
         ];
 
-        assert_eq!(cases.len(), 34, "should cover every variant exactly once");
+        assert_eq!(cases.len(), 35, "should cover every variant exactly once");
 
         for (variant, expected_wire) in cases {
             let json = serde_json::to_string(variant).unwrap();
@@ -211,6 +214,12 @@ pub struct PermissionsFile {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PermissionsChangedParams {
     pub granted: Vec<Capability>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AudioSource {
+    pub name: String,
+    pub description: String,
 }
 
 #[cfg(test)]

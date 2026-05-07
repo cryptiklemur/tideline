@@ -2,6 +2,10 @@
 import type { UiNode } from './types';
 interface Props { node: Extract<UiNode, { kind: 'spacer' }>; }
 let { node }: Props = $props();
-let h = $derived(`${node.size ?? 4}px`);
+let dim = $derived(node.size ? `${node.size}px` : undefined);
 </script>
-<div style:height={h}></div>
+{#if dim}
+    <div style:height={dim} style:width={dim} aria-hidden="true"></div>
+{:else}
+    <div class="flex-1 self-stretch" aria-hidden="true"></div>
+{/if}

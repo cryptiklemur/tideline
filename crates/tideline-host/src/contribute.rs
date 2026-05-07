@@ -46,9 +46,69 @@ fn touched_tag(d: &PipewireDirective) -> Option<RewireableTag> {
     }
 }
 
-/// Stub: returns no contributions. Wave 2 has zero plugins loaded by default.
-/// Future waves will iterate the plugin registry and dispatch
-/// `plugin/pipewire.contribute_request` to each loaded plugin.
-pub fn collect_pipewire_contributions(_cfg: &tideline_core::model::AppConfig) -> Vec<PluginContribution> {
-    Vec::new()
+pub async fn collect_pipewire_contributions(
+    registry: &crate::registry::PluginRegistry,
+    cfg: &tideline_core::model::AppConfig,
+    mix_mutes: &[tideline_sdk::contribute::MixMuteEntry],
+) -> Vec<PluginContribution> {
+    use tideline_sdk::contribute::{PipewireContributeRequest, PipewireContributeResponse, SerializedAppConfig};
+
+    let cfg_value = match serde_json::to_value(cfg) {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!(error = %e, "collect_pipewire_contributions: serialize AppConfig failed");
+            eprintln!("[contribute] serialize AppConfig failed: {e}");
+            return Vec::new();
+        }
+    };
+
+    let plugin_ids = registry
+        .plugins_with_capability(tideline_sdk::Capability::PipewireContribute)
+        .await;
+    eprintln!("[contribute] plugins_with_capability(pipewire.contribute) = {:?}", plugin_ids);
+
+    let mut out = Vec::with_capacity(plugin_ids.len());
+    for plugin_id in plugin_ids {
+        let req = PipewireContributeRequest {
+            config: SerializedAppConfig { json: cfg_value.clone() },
+            mix_mutes: mix_mutes.to_vec(),
+        };
+        let params = match serde_json::to_value(&req) {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!(plugin = %plugin_id, error = %e, "serialize contribute request failed");
+                eprintln!("[contribute] {plugin_id}: serialize req failed: {e}");
+                continue;
+            }
+        };
+        let raw = match registry
+            .send_request(&plugin_id, "pipewire.contribute_request", params)
+            .await
+        {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!(plugin = %plugin_id, error = %e, "pipewire.contribute_request failed");
+                eprintln!("[contribute] {plugin_id}: send_request failed: {e}");
+                continue;
+            }
+        };
+        let resp: PipewireContributeResponse = match serde_json::from_value(raw.clone()) {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(plugin = %plugin_id, error = %e, "parse contribute response failed");
+                eprintln!("[contribute] {plugin_id}: parse response failed: {e}; raw = {}", raw);
+                continue;
+            }
+        };
+        eprintln!("[contribute] {plugin_id}: got {} directives", resp.directives.len());
+        if resp.directives.is_empty() {
+            continue;
+        }
+        out.push(PluginContribution {
+            plugin_id,
+            priority: PluginPriority(0),
+            directives: resp.directives,
+        });
+    }
+    out
 }

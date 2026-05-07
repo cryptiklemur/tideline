@@ -10,7 +10,7 @@ use tideline_sdk::Capability;
 use tideline_sdk::types::Manifest;
 use crate::capabilities::CapabilitySet;
 use crate::contributions::{
-    ChannelOverlayContribution, Contributions, IframeSurface, KeybindActionContribution,
+    ChannelOverlayContribution, Contributions, IframeSurface, InputOverlayContribution, KeybindActionContribution,
     SettingsSectionContribution, StatusPillContribution, TrayItemContribution,
 };
 use crate::events::EventBus;
@@ -36,10 +36,6 @@ pub enum RegistryError {
     #[error("unknown contribution kind {0:?}")] UnknownContributionKind(String),
 }
 
-/// Discriminator for the 6 contribution surface types. Used by the dispatcher
-/// to route `host/contributions.{register,unregister}_*` RPC calls into the
-/// shared `register_contribution` / `unregister_contribution` paths.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ContribKind {
     SettingsSection,
     StatusPill,
@@ -47,11 +43,9 @@ pub enum ContribKind {
     IframeSurface,
     TrayItem,
     KeybindAction,
+    InputOverlay,
 }
 
-/// Per-plugin contribution storage. The registry maintains one of these per
-/// running plugin; the global `Contributions` aggregate is recomputed (and
-/// broadcast) on every register/unregister/evict.
 #[derive(Debug, Clone, Default)]
 pub struct PluginContribs {
     pub settings_sections: Vec<SettingsSectionContribution>,
@@ -60,6 +54,7 @@ pub struct PluginContribs {
     pub iframe_surfaces: Vec<IframeSurface>,
     pub tray_items: Vec<TrayItemContribution>,
     pub keybind_actions: Vec<KeybindActionContribution>,
+    pub input_overlays: Vec<InputOverlayContribution>,
 }
 
 type TestHandler = Arc<dyn Fn(&str, &serde_json::Value) -> serde_json::Value + Send + Sync>;
@@ -321,6 +316,20 @@ impl PluginRegistry {
         self.installed.read().await.keys().cloned().collect()
     }
 
+    /// Return ids of installed plugins that have been granted the given capability.
+    /// Used by orchestrators that need to fan-out RPC to a capability-filtered subset
+    /// (e.g. `pipewire.contribute` collection).
+    pub async fn plugins_with_capability(&self, cap: tideline_sdk::Capability) -> Vec<String> {
+        let installed = self.installed.read().await;
+        let mut out = Vec::new();
+        for (id, p) in installed.iter() {
+            if p.granted.read().await.has(cap) {
+                out.push(id.clone());
+            }
+        }
+        out
+    }
+
     pub async fn runtime(&self, plugin_id: &str) -> Option<Arc<PluginRuntime>> {
         let p = self.installed.read().await.get(plugin_id).cloned()?;
         let g = p.runtime.lock().await;
@@ -337,6 +346,26 @@ impl PluginRegistry {
 
     pub fn subscribe_iframe_messages(&self) -> tokio::sync::broadcast::Receiver<IframeMessage> {
         self.iframe_tx.subscribe()
+    }
+
+    pub fn subscribe_plugin_events(&self) -> tokio::sync::broadcast::Receiver<crate::events::Event> {
+        self.bus.subscribe_broadcast()
+    }
+
+
+    /// Publish a `host:*` event over the plugin event bus. Lets the host
+    /// notify subscribed plugins about lifecycle events the host itself
+    /// drives (pipewire restarts, channel removal, etc.) so plugins can
+    /// react synchronously.
+    pub async fn publish_host_event(&self, topic: &str, params: serde_json::Value) {
+        self.bus.publish_host(topic, params).await;
+    }
+
+    /// Re-fire the latest known event for every topic to existing broadcast
+    /// subscribers. Used by the Tauri layer after a frontend reload so the
+    /// webview re-receives state events it missed during boot.
+    pub async fn replay_plugin_events(&self) {
+        self.bus.replay_latest_to_broadcast().await;
     }
 
     /// Publish an iframe message to all subscribers (typically the Tauri layer
@@ -422,6 +451,13 @@ impl PluginRegistry {
                         .find(|x| x.action_id == c.action_id)
                     { *slot = c; } else { entry.keybind_actions.push(c); }
                 }
+                ContribKind::InputOverlay => {
+                    let c: InputOverlayContribution = serde_json::from_value(payload)
+                        .map_err(|e| RegistryError::InvalidContribution(e.to_string()))?;
+                    if let Some(slot) = entry.input_overlays.iter_mut()
+                        .find(|x| x.surface_id == c.surface_id)
+                    { *slot = c; } else { entry.input_overlays.push(c); }
+                }
             }
         }
         self.recompute_and_broadcast().await;
@@ -458,30 +494,34 @@ impl PluginRegistry {
                 ContribKind::KeybindAction => {
                     entry.keybind_actions.retain(|x| x.action_id != id);
                 }
+                ContribKind::InputOverlay => {
+                    entry.input_overlays.retain(|x| x.surface_id != id);
+                }
             }
         }
         self.recompute_and_broadcast().await;
         Ok(())
     }
 
-    /// Update only the `tree` field of an already-registered settings section.
-    /// Called when a plugin pushes a rendered tree via `plugin/settings.section.render`.
-    /// Silently succeeds if the section is not yet registered (push may arrive before registration).
     pub async fn update_settings_section_tree(
         &self,
         plugin_id: &str,
         surface_id: &str,
         tree: serde_json::Value,
     ) -> Result<(), RegistryError> {
+        tracing::info!("update_settings_section_tree: plugin_id={}, surface_id={}", plugin_id, surface_id);
         {
             let mut map = self.plugin_contribs.write().await;
             if let Some(entry) = map.get_mut(plugin_id) {
                 if let Some(section) = entry.settings_sections.iter_mut().find(|x| x.surface_id == surface_id) {
+                    tracing::info!("found section, updating tree");
                     section.tree = tree;
                 } else {
+                    tracing::warn!("section not found for surface_id={}", surface_id);
                     return Ok(());
                 }
             } else {
+                tracing::warn!("plugin not found: {}", plugin_id);
                 return Ok(());
             }
         }
@@ -512,6 +552,7 @@ impl PluginRegistry {
                 merged.iframe_surfaces.extend(entry.iframe_surfaces.iter().cloned());
                 merged.tray_items.extend(entry.tray_items.iter().cloned());
                 merged.keybind_actions.extend(entry.keybind_actions.iter().cloned());
+                merged.input_overlays.extend(entry.input_overlays.iter().cloned());
             }
             merged
         };

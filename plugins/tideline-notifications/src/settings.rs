@@ -37,8 +37,8 @@ mod tests {
         assert_eq!(v["children"][0]["value"], json!(false));
     }
 
-    #[test] fn renders_default_enabled_true() {
+    #[test] fn renders_default_enabled_false() {
         let v = serde_json::to_value(render(&NotifConfig::default())).unwrap();
-        assert_eq!(v["children"][0]["value"], json!(true));
+        assert_eq!(v["children"][0]["value"], json!(false));
     }
 }

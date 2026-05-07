@@ -20,9 +20,11 @@ required = [
   "tray.contribute",
   "ui.settings_section",
   "ui.status_pill",
+  "ui.input_overlay",
   "config.namespace.read",
   "config.namespace.write",
   "events.publish",
+  "events.subscribe",
 ]
 optional = []
 

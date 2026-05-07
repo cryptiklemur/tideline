@@ -1,19 +1,11 @@
 use uuid::Uuid;
 
-/// JACK client names are limited to 32 chars in many setups. We use the
-/// uuid's first 8 hex chars for compactness while staying unique across a
-/// reasonable channel count.
-pub fn carla_client_name(channel_uuid: Uuid) -> String {
-    let hex = channel_uuid.simple().to_string();
-    format!("tideline-fx-{}", &hex[..8])
-}
-
-pub fn fx_input_port(channel_uuid: Uuid, lr: char) -> String {
-    format!("{}:in_{}", carla_client_name(channel_uuid), lr)
-}
-
-pub fn fx_output_port(channel_uuid: Uuid, lr: char) -> String {
-    format!("{}:out_{}", carla_client_name(channel_uuid), lr)
+/// In-process audio engine exposes one JACK client per channel, named
+/// `tideline-fx-{simple_uuid}` (see `engine::channel::Channel::open`).
+/// The whole chain runs inside that single client, so callers no longer
+/// need per-effect names — only this channel-level node identifier.
+pub fn channel_jack_client(channel_uuid: Uuid) -> String {
+    format!("tideline-fx-{}", channel_uuid.simple())
 }
 
 #[cfg(test)]
@@ -21,15 +13,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn carla_client_name_is_short_and_stable() {
-        let u = Uuid::parse_str("12345678-9abc-def0-1234-56789abcdef0").unwrap();
-        assert_eq!(carla_client_name(u), "tideline-fx-12345678");
-    }
-
-    #[test]
-    fn input_and_output_ports_format_correctly() {
-        let u = Uuid::parse_str("12345678-9abc-def0-1234-56789abcdef0").unwrap();
-        assert_eq!(fx_input_port(u, 'l'), "tideline-fx-12345678:in_l");
-        assert_eq!(fx_output_port(u, 'r'), "tideline-fx-12345678:out_r");
+    fn channel_node_name_matches_engine() {
+        let ch = Uuid::parse_str("8fc82af3-1dfc-41ce-8eb0-528e68852657").unwrap();
+        assert_eq!(
+            channel_jack_client(ch),
+            "tideline-fx-8fc82af31dfc41ce8eb0528e68852657"
+        );
     }
 }

@@ -7,6 +7,9 @@ import Icon from './Icon.svelte';
 import SourcePicker from './SourcePicker.svelte';
 import { isControlBlacklisted } from './cardControlBlacklist';
 import type { CardControl, ChannelKind } from './types';
+import { pluginUi } from './plugin-ui/pluginUi.svelte';
+import InputOverlay from './plugin-ui/InputOverlay.svelte';
+import type { UiEvent } from './plugin-ui/types';
 
 interface Props {
     name: string;
@@ -35,7 +38,10 @@ let deleteTimer: ReturnType<typeof setTimeout> | null = null;
 let cardId = $state<number | null>(null);
 let cardControls = $state<CardControl[]>([]);
 let cardLoaded = $state(false);
-let cardPollTimer: ReturnType<typeof setInterval> | null = null;
+let muteUnlisten: UnlistenFn | null = null;
+let volUnlisten: UnlistenFn | null = null;
+let cardCtrlVolUnlisten: UnlistenFn | null = null;
+let cardCtrlMuteUnlisten: UnlistenFn | null = null;
 
 const METER_FLOOR_DB = -60;
 const PEAK_HOLD_MS = 1200;
@@ -62,9 +68,50 @@ onMount(async () => {
         cardId = await invoke<number | null>('get_card_for_source', { source: physicalSource });
         if (cardId !== null) {
             await reloadCardControls();
-            cardPollTimer = setInterval(reloadCardControls, 2000);
         }
         cardLoaded = true;
+        muteUnlisten = await listen<{ source_name: string; muted: boolean }>(
+            'tideline:source_mute_changed',
+            e => { if (e.payload.source_name === physicalSource) muted = e.payload.muted; },
+        );
+        volUnlisten = await listen<{ source_name: string; volume_pct: number }>(
+            'tideline:source_volume_changed',
+            e => {
+                if (e.payload.source_name === physicalSource && !primaryCapture) {
+                    inVol = e.payload.volume_pct;
+                }
+            },
+        );
+        cardCtrlVolUnlisten = await listen<{ card: number; name: string; volume_pct: number }>(
+            'tideline:card_control_volume_changed',
+            e => {
+                if (cardId === null || e.payload.card !== cardId) return;
+                cardControls = cardControls.map(c =>
+                    c.name === e.payload.name ? { ...c, volume_percent: e.payload.volume_pct } : c
+                );
+                if (primaryCapture && primaryCapture.name === e.payload.name) {
+                    inVol = e.payload.volume_pct;
+                }
+            },
+        );
+        cardCtrlMuteUnlisten = await listen<{ card: number; name: string; muted: boolean }>(
+            'tideline:card_control_mute_changed',
+            e => {
+                if (cardId === null || e.payload.card !== cardId) return;
+                cardControls = cardControls.map(c =>
+                    c.name === e.payload.name ? { ...c, muted: e.payload.muted } : c
+                );
+            },
+        );
+    } else if (kind === 'input' && sinkName) {
+        muteUnlisten = await listen<{ sink_name: string; muted: boolean }>(
+            'tideline:sink_mute_changed',
+            e => { if (e.payload.sink_name === sinkName) muted = e.payload.muted; },
+        );
+        volUnlisten = await listen<{ sink_name: string; volume_pct: number }>(
+            'tideline:sink_volume_changed',
+            e => { if (e.payload.sink_name === sinkName) inVol = e.payload.volume_pct; },
+        );
     }
     if (meterSource) {
         const eventName = `level:${meterSource.replace(/\./g, '_')}`;
@@ -94,10 +141,27 @@ onMount(async () => {
 onDestroy(() => {
     if (levelUnlisten) levelUnlisten();
     if (rafId !== null) cancelAnimationFrame(rafId);
-    if (cardPollTimer !== null) clearInterval(cardPollTimer);
+    muteUnlisten?.();
+    volUnlisten?.();
+    cardCtrlVolUnlisten?.();
+    cardCtrlMuteUnlisten?.();
 });
 
 let captureControls = $derived(cardControls.filter(c => c.is_capture));
+
+let inputOverlays = $derived(
+    kind === 'physical_input' && physicalSource
+        ? pluginUi.contributions.input_overlays.filter(o =>
+            o.input_filter.kind === 'all'
+            || o.input_filter.kind === 'physical_only'
+            || (o.input_filter.kind === 'source_names' && o.input_filter.names.includes(physicalSource))
+        )
+        : []
+);
+
+function emitOverlay(pluginId: string, ev: UiEvent) {
+    pluginUi.emit(pluginId, ev);
+}
 let visibleCaptureControls = $derived(captureControls.filter(c => !isControlBlacklisted(physicalSource, c.name)));
 let primaryCapture = $derived(
     kind === 'physical_input'
@@ -330,6 +394,12 @@ function requestDelete() {
                 <p class="m-0 text-[10px] text-base-content/55 leading-snug">No ALSA card found for this source. Hardware-level controls are unavailable.</p>
             </section>
         {/if}
+
+        {#each inputOverlays as overlay (overlay.plugin_id + ':' + overlay.surface_id)}
+            <section class="flex flex-col gap-2 p-3 bg-base-100 border border-base-content/15 rounded-md">
+                <InputOverlay {overlay} sourceName={physicalSource} emit={(e) => emitOverlay(overlay.plugin_id, e)} />
+            </section>
+        {/each}
     {/if}
 
     <div class="flex gap-2">

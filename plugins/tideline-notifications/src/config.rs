@@ -6,10 +6,10 @@ pub struct NotifConfig {
     pub enabled: bool,
 }
 
-fn default_enabled() -> bool { true }
+fn default_enabled() -> bool { false }
 
 impl Default for NotifConfig {
-    fn default() -> Self { Self { enabled: true } }
+    fn default() -> Self { Self { enabled: false } }
 }
 
 impl NotifConfig {
@@ -22,8 +22,8 @@ impl NotifConfig {
 mod tests {
     use super::*;
 
-    #[test] fn default_is_enabled() {
-        assert!(NotifConfig::default().enabled);
+    #[test] fn default_is_disabled() {
+        assert!(!NotifConfig::default().enabled);
     }
 
     #[test] fn missing_fields_use_defaults() {

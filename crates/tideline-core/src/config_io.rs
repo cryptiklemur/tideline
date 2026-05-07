@@ -113,26 +113,6 @@ fn migrate_legacy_tones_into_plugin_data(raw: &mut serde_json::Value) {
         .or_insert_with(|| serde_json::json!({ "enabled": enabled, "volume": volume }));
 }
 
-fn migrate_legacy_led_enabled_into_plugin_data(raw: &mut serde_json::Value) {
-    let Some(ptt) = raw.get("ptt").and_then(|v| v.as_object()) else {
-        return;
-    };
-    let Some(led_enabled) = ptt.get("led_enabled").and_then(|v| v.as_bool()) else {
-        return;
-    };
-    let plugin_data = raw
-        .as_object_mut()
-        .expect("AppConfig is a JSON object")
-        .entry("plugin_data".to_string())
-        .or_insert_with(|| serde_json::json!({}));
-    let pd_obj = plugin_data
-        .as_object_mut()
-        .expect("plugin_data is an object");
-    pd_obj
-        .entry("tideline-wave-xlr".to_string())
-        .or_insert_with(|| serde_json::json!({ "led_enabled": led_enabled }));
-}
-
 fn migrate_legacy_ptt_into_plugin_data(raw: &mut serde_json::Value) {
     let Some(root) = raw.as_object_mut() else {
         return;
@@ -165,7 +145,6 @@ pub fn load_config_from(path: &Path) -> io::Result<AppConfig> {
     let mut json: serde_json::Value =
         serde_json::from_str(&raw).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
     migrate_legacy_tones_into_plugin_data(&mut json);
-    migrate_legacy_led_enabled_into_plugin_data(&mut json);
     migrate_legacy_ptt_into_plugin_data(&mut json);
     let mut cfg: AppConfig =
         serde_json::from_value(json).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
@@ -264,59 +243,6 @@ mod tones_migration_tests {
 }
 
 #[cfg(test)]
-mod led_enabled_migration_tests {
-    use super::migrate_legacy_led_enabled_into_plugin_data;
-    use serde_json::json;
-
-    #[test]
-    fn legacy_led_enabled_copied_into_plugin_data() {
-        let mut raw = json!({
-            "ptt": { "led_enabled": false }
-        });
-        migrate_legacy_led_enabled_into_plugin_data(&mut raw);
-        let bag = raw
-            .pointer("/plugin_data/tideline-wave-xlr")
-            .expect("wave-xlr plugin data");
-        assert_eq!(bag["led_enabled"], json!(false));
-    }
-
-    #[test]
-    fn missing_led_enabled_field_is_a_noop() {
-        let mut raw = json!({ "ptt": {} });
-        migrate_legacy_led_enabled_into_plugin_data(&mut raw);
-        assert!(raw.pointer("/plugin_data/tideline-wave-xlr").is_none());
-    }
-
-    #[test]
-    fn does_not_overwrite_existing_plugin_data() {
-        let mut raw = json!({
-            "ptt": { "led_enabled": true },
-            "plugin_data": {
-                "tideline-wave-xlr": { "led_enabled": false }
-            }
-        });
-        migrate_legacy_led_enabled_into_plugin_data(&mut raw);
-        assert_eq!(
-            raw["plugin_data"]["tideline-wave-xlr"]["led_enabled"],
-            json!(false),
-            "existing namespaced value must not be clobbered"
-        );
-    }
-
-    #[test]
-    fn creates_plugin_data_object_when_absent() {
-        let mut raw = json!({
-            "ptt": { "led_enabled": true }
-        });
-        migrate_legacy_led_enabled_into_plugin_data(&mut raw);
-        assert_eq!(
-            raw["plugin_data"]["tideline-wave-xlr"]["led_enabled"],
-            json!(true)
-        );
-    }
-}
-
-#[cfg(test)]
 mod ptt_migration_tests {
     use super::migrate_legacy_ptt_into_plugin_data;
     use serde_json::json;
@@ -373,28 +299,21 @@ mod ptt_migration_tests {
     }
 
     #[test]
-    fn runs_after_tones_and_led_migrations() {
-        use super::migrate_legacy_led_enabled_into_plugin_data;
+    fn runs_after_tones_migration() {
         use super::migrate_legacy_tones_into_plugin_data;
         let mut raw = json!({
             "ptt": {
                 "mode": "ptt",
                 "tones_enabled": false,
                 "tones_volume": 60,
-                "led_enabled": false,
                 "input_device": "mic"
             }
         });
         migrate_legacy_tones_into_plugin_data(&mut raw);
-        migrate_legacy_led_enabled_into_plugin_data(&mut raw);
         migrate_legacy_ptt_into_plugin_data(&mut raw);
 
         assert_eq!(
             raw.pointer("/plugin_data/tideline-tones/enabled"),
-            Some(&json!(false))
-        );
-        assert_eq!(
-            raw.pointer("/plugin_data/tideline-wave-xlr/led_enabled"),
             Some(&json!(false))
         );
         let ptt = raw.pointer("/plugin_data/tideline-ptt").unwrap();

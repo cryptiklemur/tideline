@@ -4,6 +4,9 @@ import { onMount, tick } from 'svelte';
 import Icon from './Icon.svelte';
 import Modal from './Modal.svelte';
 import type { SourceInfo } from './types';
+import { pluginUi } from './plugin-ui/pluginUi.svelte';
+import InputOverlay from './plugin-ui/InputOverlay.svelte';
+import type { InputOverlayContribution, UiEvent } from './plugin-ui/types';
 
 type InputKind = 'input' | 'physical_input';
 
@@ -27,6 +30,18 @@ let nameTouched = $state(false);
 let physTouched = $state(false);
 let submitAttempted = $state(false);
 let nameInputEl = $state<HTMLInputElement>();
+
+let inputOverlays = $derived(
+    pluginUi.contributions.input_overlays.filter(o =>
+        o.input_filter.kind === 'all'
+        || o.input_filter.kind === 'physical_only'
+        || (o.input_filter.kind === 'source_names' && o.input_filter.names.includes(physSource))
+    )
+);
+
+function emitOverlay(pluginId: string, ev: UiEvent) {
+    pluginUi.emit(pluginId, ev);
+}
 
 function deriveNameFromSource(srcName: string): string {
     const src = hardwareInputs.find(s => s.name === srcName);
@@ -162,6 +177,14 @@ function selectKind(k: InputKind) {
                 <p class="text-sm text-base-content/55 m-0 leading-snug">No hardware inputs detected. Plug in a mic or check that your audio interface is connected.</p>
             {/if}
         </section>
+
+        {#if physSource}
+            {#each inputOverlays as overlay (overlay.plugin_id + ':' + overlay.surface_id)}
+                <section class="px-4 py-3 border-b border-base-content/10 flex flex-col gap-2">
+                    <InputOverlay {overlay} sourceName={physSource} emit={(e) => emitOverlay(overlay.plugin_id, e)} />
+                </section>
+            {/each}
+        {/if}
     {/if}
 
     <section class="px-4 py-3 flex flex-col gap-2">

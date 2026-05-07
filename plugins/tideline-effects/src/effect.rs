@@ -1,14 +1,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum PluginFormat {
-    Lv2,
-    Vst3,
-    Vst2,
-    Clap,
-}
+pub use crate::host::Format as PluginFormat;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Effect {

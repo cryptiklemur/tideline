@@ -1,7 +1,6 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/carla-sys",
     "crates/tideline-core",
     "crates/tideline-sdk",
     "crates/tideline-host",
@@ -10,7 +9,6 @@ members = [
     "plugins/tideline-notifications",
     "plugins/tideline-ptt",
     "plugins/tideline-tones",
-    "plugins/tideline-wave-xlr",
     "src-tauri",
 ]
 

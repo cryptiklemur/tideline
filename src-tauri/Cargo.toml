@@ -41,4 +41,5 @@ mime_guess = "2"
 dirs = "5"
 notify-rust = "4"
 async-trait = { workspace = true }
+uuid = { workspace = true }
 

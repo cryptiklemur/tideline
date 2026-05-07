@@ -9,9 +9,20 @@ interface Props {
     emit: (e: UiEvent) => void;
 }
 let { node, surfaceId, pluginId, emit }: Props = $props();
+
+let isCard = $derived(node.variant === 'card');
+let gap = $derived(node.gap ?? (isCard ? 3 : 2));
+let gapClass = $derived(
+    gap >= 4 ? 'gap-4' : gap === 3 ? 'gap-3' : gap === 2 ? 'gap-2' : gap === 1 ? 'gap-1' : 'gap-0'
+);
+let containerClass = $derived(
+    isCard
+        ? `flex flex-col ${gapClass} mb-4 rounded-lg border border-base-content/10 bg-base-200/40 px-4 py-3`
+        : `flex flex-col ${gapClass} mb-4`
+);
 </script>
 
-<section class="flex flex-col gap-2 mb-4" data-section-id={node.id}>
+<section class={containerClass} data-section-id={node.id}>
     {#if node.title}
         <h4 class="text-[10px] font-bold uppercase tracking-widest text-base-content/55 m-0">{node.title}</h4>
     {/if}
