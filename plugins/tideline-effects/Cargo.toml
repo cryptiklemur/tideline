@@ -38,6 +38,7 @@ lilv-sys = "0.2"
 xcb = "1"
 arc-swap = "1"
 parking_lot = "0.12"
+libc = "0.2"
 
 [build-dependencies]
 bindgen = "0.71"

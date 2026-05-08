@@ -48,6 +48,11 @@ pub struct EffectsState {
     /// in the catalog instead of failing with "plugin not in catalog".
     pub catalog_ready: std::sync::atomic::AtomicBool,
     pub catalog_ready_notify: tokio::sync::Notify,
+    /// Per-session FX-audition session (one channel at a time). Holds
+    /// the recorded sample, recording/loop-player processes, and the
+    /// channel slug that drives the temp `audition_source.*` virtual
+    /// source name. Ephemeral — never written to disk.
+    pub audition: crate::audition::AuditionStore,
 }
 
 impl EffectsState {
@@ -64,6 +69,7 @@ impl EffectsState {
             appconfig_synced: std::sync::atomic::AtomicBool::new(false),
             catalog_ready: std::sync::atomic::AtomicBool::new(false),
             catalog_ready_notify: tokio::sync::Notify::new(),
+            audition: crate::audition::AuditionStore::new(),
         })
     }
 
@@ -283,6 +289,7 @@ pub async fn on_channel_removed(state: Arc<EffectsState>, params: Option<Value>)
     {
         state.chain_bypass.lock().await.remove(&channel_id);
     }
+    state.audition.discard(Some(channel_id)).await;
     crate::persist::save_chains_to_disk(&state).await;
 }
 

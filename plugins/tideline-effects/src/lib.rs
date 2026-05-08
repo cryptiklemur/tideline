@@ -1,4 +1,5 @@
 //! tideline-effects plugin — library surface re-exports for tests.
+pub mod audition;
 pub mod chain_ops;
 pub mod effect;
 pub mod state;

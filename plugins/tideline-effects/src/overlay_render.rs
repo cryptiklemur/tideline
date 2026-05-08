@@ -141,7 +141,7 @@ mod tests {
         let off = channel_card_tree(false);
         assert_eq!(off["children"][0]["variant"], "ghost");
         let on = channel_card_tree(true);
-        assert_eq!(on["children"][0]["variant"], "primary");
+        assert_eq!(on["children"][0]["variant"], "success");
     }
 
     #[test]
@@ -174,7 +174,7 @@ mod tests {
         state.attach_effect(chan, Effect::new_lv2("uri")).await;
         let params = Some(json!({"surface_id": CHANNEL_CARD_SLOT, "channel_uuid": chan}));
         let v = render_overlay(&state, params).await.unwrap();
-        assert_eq!(v["children"][0]["variant"], "primary");
+        assert_eq!(v["children"][0]["variant"], "success");
     }
 
     #[tokio::test]

@@ -4618,6 +4618,7 @@ dependencies = [
  "bindgen 0.71.1",
  "dirs 5.0.1",
  "jack",
+ "libc",
  "lilv-sys",
  "livi",
  "lv2_raw",

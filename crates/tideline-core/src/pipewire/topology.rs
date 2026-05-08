@@ -160,7 +160,7 @@ pub fn build_base_topology(
 
                 // Feeding loopback: real mic → virtual source. Replaced by
                 // the contributor's fx-virtual loopback when the chain is
-                // active (real mic → carla → virtual source).
+                // active (real mic → in-process FX engine → virtual source).
                 let feed_cap = format!("capture.{s}-fx-feed");
                 let feed_pb = format!("playback.{s}-fx-feed");
                 out.push(loopback_directive(

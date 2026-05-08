@@ -1,3 +1,4 @@
+mod audition;
 mod chain_ops;
 #[allow(dead_code)]
 mod effect;
@@ -208,6 +209,30 @@ impl Plugin for EffectsPlugin {
             "effects.rack_event" => rack::handle_event(&self.state, host, params).await,
             "pipewire.contribute_request" => {
                 pipewire_contributor::respond(&self.state, params).await
+            }
+            "effects.audition_record_start" => {
+                audition::handle_record_start(&self.state, host, params).await
+            }
+            "effects.audition_record_stop" => {
+                audition::handle_record_stop(&self.state, host, params).await
+            }
+            "effects.audition_loop_start" => {
+                audition::handle_loop_start(&self.state, host, params).await
+            }
+            "effects.audition_loop_stop" => {
+                audition::handle_loop_stop(&self.state, host, params).await
+            }
+            "effects.audition_loop_pause" => {
+                audition::handle_loop_pause(&self.state, host, params).await
+            }
+            "effects.audition_loop_resume" => {
+                audition::handle_loop_resume(&self.state, host, params).await
+            }
+            "effects.audition_state" => {
+                audition::handle_status(&self.state, host, params).await
+            }
+            "effects.audition_discard" => {
+                audition::handle_discard(&self.state, host, params).await
             }
             other => Err(RpcError {
                 code: error_codes::METHOD_NOT_FOUND,

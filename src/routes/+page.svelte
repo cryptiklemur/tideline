@@ -122,7 +122,7 @@ let addChannelOpen = $state(false);
 let addMixOpen = $state(false);
 let settingsForIndex = $state<number | null>(null);
 let settingsForChannel = $derived(settingsForIndex !== null ? config.channels[settingsForIndex] ?? null : null);
-let rackOpen = $state<{ pluginId: string; channelUuid: string; channelName: string; channelKind: 'physical_input' | 'input' | 'output' } | null>(null);
+let rackOpen = $state<{ pluginId: string; channelUuid: string; channelName: string; channelKind: 'physical_input' | 'input' | 'output'; physicalSource: string } | null>(null);
 
 onMount(() => {
     void pluginUi.init();
@@ -580,7 +580,7 @@ onDestroy(() => pluginUi.teardown());
                                     onSettings={() => settingsForIndex = configIndex}
                                     channelCardOverlays={overlaysFor(ch.uuid, 'channel_card')}
                                     onOverlayEmit={(pluginId, ev) => pluginUi.emit(pluginId, ev)}
-                                    onOpenRack={(pluginId, channelUuid) => rackOpen = { pluginId, channelUuid, channelName: ch.name, channelKind: ch.kind }}
+                                    onOpenRack={(pluginId, channelUuid) => rackOpen = { pluginId, channelUuid, channelName: ch.name, channelKind: ch.kind, physicalSource: ch.physical_source ?? '' }}
                                     draggable={true}
                                     isDragging={dragIndex === configIndex}
                                     isDragOver={dragOverIndex === configIndex && dragIndex !== configIndex}
@@ -743,6 +743,7 @@ onDestroy(() => pluginUi.teardown());
         channelUuid={rackOpen.channelUuid}
         channelName={rackOpen.channelName}
         channelKind={rackOpen.channelKind}
+        physicalSource={rackOpen.physicalSource}
         onClose={() => rackOpen = null}
     />
 {/if}

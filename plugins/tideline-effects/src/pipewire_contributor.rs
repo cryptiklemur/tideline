@@ -120,15 +120,22 @@ fn persisted_chains_from_appconfig(cfg: &AppConfig) -> crate::persist::Persisted
     }
 }
 
-/// Walks every channel, calls per-channel builder for those with effects.
-pub fn build_all_directives(cfg: &AppConfig, mix_mutes: &[MixMuteEntry]) -> Vec<PipewireDirective> {
+pub fn build_all_directives(
+    cfg: &AppConfig,
+    mix_mutes: &[MixMuteEntry],
+) -> Vec<PipewireDirective> {
     let mut out = Vec::new();
     for ch in &cfg.channels {
         let data = read_effects_data(ch);
         if !chain_should_apply(&data) {
             continue;
         }
-        out.extend(build_directives_for_channel(ch, &cfg.mixes, &data, mix_mutes));
+        out.extend(build_directives_for_channel(
+            ch,
+            &cfg.mixes,
+            &data,
+            mix_mutes,
+        ));
     }
     out
 }
@@ -250,8 +257,9 @@ pub fn build_directives_for_channel(
                 // `fx_source.{slug}` (created in topology.rs with role
                 // `physical_input_virtual_source` so it survives this
                 // contributor's DestroyModule). Capture side reads from
-                // the carla JACK client; playback writes into the
-                // virtual source, where apps record from.
+                // the in-process JACK client (livi-hosted LV2 chain);
+                // playback writes into the virtual source, where apps
+                // record from.
                 let virt_cap = format!("capture.{s}-fx-virtual");
                 let virt_pb = format!("playback.{s}-fx-virtual");
                 let virt_source = fx_source_node(ch);
