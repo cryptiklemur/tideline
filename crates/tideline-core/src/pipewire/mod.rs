@@ -28,6 +28,15 @@ pub fn sink_node_for_channel(ch: &ChannelCfg) -> String {
         .unwrap_or_else(|| format!("sink.{}", slug(&ch.name)))
 }
 
+/// Persistent virtual-source endpoint for a PhysicalInput channel.
+/// Apps (e.g. Discord) record from this — it appears as "{name} - FX"
+/// in their device selectors. Created in base topology with role
+/// `physical_input_virtual_source` so the effects-plugin contributor
+/// won't destroy it when toggling the chain.
+pub fn fx_source_node(ch: &ChannelCfg) -> String {
+    format!("fx_source.{}", slug(&ch.name))
+}
+
 /// Two-phase pipeline: build base topology (filtered by per-mix mute),
 /// fold each contribution batch in order, then serialize. An empty
 /// `contributions` slice yields the base topology unchanged.

@@ -8,7 +8,7 @@ use serde_json::Value;
 use tideline_core::config_io::slug;
 use tideline_core::model::{AppConfig, ChannelCfg, ChannelKind, Mix};
 use tideline_core::pipewire::directive::{ArgValue, LoadModuleHeader, PipewireDirective, RewireableTag};
-use tideline_core::pipewire::{mix_capture_node, mix_playback_node, sink_node_for_channel};
+use tideline_core::pipewire::{fx_source_node, mix_capture_node, mix_playback_node, sink_node_for_channel};
 use tideline_sdk::contribute::{MixMuteEntry, PipewireContributeRequest};
 use tideline_sdk::rpc::{error_codes, RpcError};
 
@@ -36,10 +36,14 @@ pub async fn respond(state: &Arc<EffectsState>, params: Option<Value>) -> Result
 
     // First-call sync: rebuild engine chains from AppConfig.plugin_data so a
     // missing/stale chains.json gets superseded by the host's source-of-truth.
+    // Wait for the catalog before reconciling — contribute_request can arrive
+    // before `discovery::run_first_boot` populates it, in which case
+    // `add_effect` fails with "plugin <uri> not in catalog" for every effect.
     if !state
         .appconfig_synced
         .swap(true, std::sync::atomic::Ordering::Relaxed)
     {
+        state.wait_for_catalog().await;
         let persisted = persisted_chains_from_appconfig(&cfg);
         let total = persisted.channels.len();
         if total > 0 {
@@ -241,9 +245,16 @@ pub fn build_directives_for_channel(
     match ch.kind {
         ChannelKind::Output | ChannelKind::PhysicalInput => {
             if matches!(ch.kind, ChannelKind::PhysicalInput) {
+                // Replaces the base topology's fx-feed loopback. Both
+                // target the persistent virtual-source endpoint
+                // `fx_source.{slug}` (created in topology.rs with role
+                // `physical_input_virtual_source` so it survives this
+                // contributor's DestroyModule). Capture side reads from
+                // the carla JACK client; playback writes into the
+                // virtual source, where apps record from.
                 let virt_cap = format!("capture.{s}-fx-virtual");
-                let virt_pb = format!("playback.{s}-fx-source");
-                let virt_desc = format!("{} - FX", ch.name);
+                let virt_pb = format!("playback.{s}-fx-virtual");
+                let virt_source = fx_source_node(ch);
                 out.push(loopback(
                     vec![
                         ("node.name".into(), quoted(virt_cap)),
@@ -254,8 +265,8 @@ pub fn build_directives_for_channel(
                     ],
                     vec![
                         ("node.name".into(), quoted(virt_pb)),
-                        ("node.description".into(), quoted(&virt_desc)),
-                        ("media.class".into(), quoted("Audio/Source/Virtual")),
+                        ("target.object".into(), quoted(&virt_source)),
+                        ("node.autoconnect".into(), literal("false")),
                         ("audio.position".into(), fl_fr()),
                     ],
                     Some(tag.clone()),

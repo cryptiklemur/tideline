@@ -42,9 +42,49 @@ impl Plugin for EffectsPlugin {
     async fn on_ready(&self, host: Arc<HostClient>) {
         self.state.set_host(host.clone());
 
+        // Phase 1: init engine BEFORE announcing to host. host.initialize()
+        // triggers a contribute_request whose first-call sync (in
+        // pipewire_contributor::respond) calls apply_persisted_chains against
+        // the engine. If the engine isn't ready yet (~450ms livi+jack init),
+        // every add_effect fails with "engine not initialized" and the
+        // user sees no JACK clients spawn for any effect chain.
+        let persisted = persist::load_chains_from_disk();
+
+        let mut registry = host::FormatRegistry::new();
+        registry.register(Arc::new(host::lv2::Lv2Format::default()));
+        let engine_ready = match engine::AudioEngine::new(Arc::new(registry)) {
+            Ok(engine) => {
+                let engine = Arc::new(engine);
+                self.state.set_engine(engine.clone());
+                engine::spawn_ui_idle_pump(Arc::downgrade(&engine));
+                // Catalog MUST be populated before apply_persisted_chains —
+                // otherwise plugin_info_for returns None for every persisted
+                // effect, add_effect fails, and the user observes "effects
+                // lost on restart" even though chains.json had the data.
+                discovery::run_first_boot(self.state.clone()).await;
+                state::apply_persisted_chains(self.state.clone(), persisted).await;
+                true
+            }
+            Err(e) => {
+                error!(error = %e, "audio engine init failed");
+                false
+            }
+        };
+
+        // Phase 2: announce plugin + register surfaces. Contribute_request
+        // RPCs that fire in response now find a ready engine.
         if let Err(e) = host.initialize(PLUGIN_ID, VERSION, SDK_VERSION).await {
             error!(?e, "initialize failed");
             return;
+        }
+
+        if !engine_ready {
+            let _ = host
+                .event_publish(
+                    "tideline-effects:engine_unhealthy",
+                    serde_json::json!({"reason": "audio engine init failed"}),
+                )
+                .await;
         }
 
         if let Err(e) = host
@@ -92,52 +132,29 @@ impl Plugin for EffectsPlugin {
             warn!(?e, "register_channel_overlay channel_card failed");
         }
 
-        let persisted = persist::load_chains_from_disk();
-
-        let mut registry = host::FormatRegistry::new();
-        registry.register(Arc::new(host::lv2::Lv2Format::default()));
-        match engine::AudioEngine::new(Arc::new(registry)) {
-            Ok(engine) => {
-                let engine = Arc::new(engine);
-                self.state.set_engine(engine.clone());
-                engine::spawn_ui_idle_pump(Arc::downgrade(&engine));
-                // Catalog MUST be populated before apply_persisted_chains —
-                // otherwise plugin_info_for returns None for every persisted
-                // effect, add_effect fails, and the user observes "effects
-                // lost on restart" even though chains.json had the data.
-                discovery::run_first_boot(self.state.clone()).await;
-                state::apply_persisted_chains(self.state.clone(), persisted).await;
-                let mut persisted_any = false;
-                for channel in self.state.channels_with_effects().await {
-                    match crate::iframe_bridge::persist_channel(
-                        &self.state,
-                        &host,
-                        channel,
-                    ).await {
-                        Ok(_) => { persisted_any = true; }
-                        Err(e) => warn!(?e, %channel, "startup persist_channel failed"),
-                    }
-                }
-                if persisted_any {
-                    if let Err(e) = host
-                        .event_publish(
-                            "tideline-effects:rack_changed",
-                            serde_json::json!({ "reason": "startup_persist" }),
-                        )
-                        .await
-                    {
-                        warn!(?e, "startup rack_changed publish failed");
-                    }
+        // Phase 3: push startup state now that surfaces are registered.
+        if engine_ready {
+            let mut persisted_any = false;
+            for channel in self.state.channels_with_effects().await {
+                match crate::iframe_bridge::persist_channel(
+                    &self.state,
+                    &host,
+                    channel,
+                ).await {
+                    Ok(_) => { persisted_any = true; }
+                    Err(e) => warn!(?e, %channel, "startup persist_channel failed"),
                 }
             }
-            Err(e) => {
-                error!(error = %e, "audio engine init failed");
-                let _ = host
+            if persisted_any {
+                if let Err(e) = host
                     .event_publish(
-                        "tideline-effects:engine_unhealthy",
-                        serde_json::json!({"reason": e.to_string()}),
+                        "tideline-effects:rack_changed",
+                        serde_json::json!({ "reason": "startup_persist" }),
                     )
-                    .await;
+                    .await
+                {
+                    warn!(?e, "startup rack_changed publish failed");
+                }
             }
         }
 

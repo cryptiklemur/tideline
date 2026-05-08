@@ -1,5 +1,5 @@
 use super::directive::{ArgValue, LoadModuleHeader, PipewireDirective, RewireableTag};
-use super::{mix_capture_node, mix_playback_node, sink_node_for_channel};
+use super::{fx_source_node, mix_capture_node, mix_playback_node, sink_node_for_channel};
 use crate::config_io::slug;
 use crate::model::{AppConfig, ChannelKind};
 
@@ -127,28 +127,55 @@ pub fn build_base_topology(
                     continue;
                 }
                 let s = slug(&ch.name);
-                let tag = RewireableTag {
+                let loopback_tag = RewireableTag {
                     channel_uuid: ch.uuid.to_string(),
                     role: role_for_kind(ch.kind).into(),
                 };
+                let virtual_source_tag = RewireableTag {
+                    channel_uuid: ch.uuid.to_string(),
+                    role: "physical_input_virtual_source".into(),
+                };
 
-                let virt_cap = format!("capture.{s}-fx-virtual");
-                let virt_pb = format!("playback.{s}-fx-source");
+                let virt_source = fx_source_node(ch);
                 let virt_desc = format!("{} - FX", ch.name);
+
+                // Persistent virtual-source endpoint. Apps record from this
+                // (it's named "{name} - FX" in their selectors). Owned by a
+                // separate role so the effects-plugin contributor's
+                // DestroyModule { role: physical_input_loopback } leaves it
+                // alone — without this, toggling the chain would tear down
+                // and recreate the virtual source, dropping app connections.
+                out.push(PipewireDirective::LoadModule {
+                    header: LoadModuleHeader::Factory("adapter".into()),
+                    args: vec![
+                        ("factory.name".into(), literal("support.null-audio-sink")),
+                        ("node.name".into(), quoted(&virt_source)),
+                        ("node.description".into(), quoted(&virt_desc)),
+                        ("media.class".into(), quoted("Audio/Source/Virtual")),
+                        ("audio.position".into(), fl_fr()),
+                        ("monitor.passthrough".into(), literal("true")),
+                    ],
+                    rewireable_tag: Some(virtual_source_tag),
+                });
+
+                // Feeding loopback: real mic → virtual source. Replaced by
+                // the contributor's fx-virtual loopback when the chain is
+                // active (real mic → carla → virtual source).
+                let feed_cap = format!("capture.{s}-fx-feed");
+                let feed_pb = format!("playback.{s}-fx-feed");
                 out.push(loopback_directive(
                     vec![
-                        ("node.name".into(), quoted(virt_cap)),
+                        ("node.name".into(), quoted(feed_cap)),
                         ("target.object".into(), quoted(&ch.physical_source)),
                         ("audio.position".into(), fl_fr()),
                         ("stream.dont-remix".into(), literal("true")),
                     ],
                     vec![
-                        ("node.name".into(), quoted(virt_pb)),
-                        ("node.description".into(), quoted(&virt_desc)),
-                        ("media.class".into(), quoted("Audio/Source/Virtual")),
+                        ("node.name".into(), quoted(feed_pb)),
+                        ("target.object".into(), quoted(&virt_source)),
                         ("audio.position".into(), fl_fr()),
                     ],
-                    tag.clone(),
+                    loopback_tag.clone(),
                 ));
 
                 for mix in &cfg.mixes {
@@ -169,7 +196,7 @@ pub fn build_base_topology(
                         out.push(loopback_directive(
                             capture_props,
                             playback_props,
-                            tag.clone(),
+                            loopback_tag.clone(),
                         ));
                     }
                 }

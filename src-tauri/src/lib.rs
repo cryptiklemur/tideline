@@ -1039,6 +1039,20 @@ pub async fn wire_fx_links(cfg: &AppConfig) {
                         format!("{fx}:out_FR"),
                         format!("capture.{s}-fx-virtual:input_1"),
                     ));
+                    // playback.fx-virtual lands on fx_source (Audio/Source/Virtual).
+                    // pipewire's loopback target.object only auto-routes to sinks,
+                    // so the playback gets autoconnect=false in the contributor and
+                    // wires explicitly here. without this, the playback falls back
+                    // to the default sink (sink.system) and apps recording from
+                    // fx_source see silence while audio leaks into the headphones path.
+                    pairs.push((
+                        format!("playback.{s}-fx-virtual:output_0"),
+                        format!("fx_source.{s}:input_0"),
+                    ));
+                    pairs.push((
+                        format!("playback.{s}-fx-virtual:output_1"),
+                        format!("fx_source.{s}:input_1"),
+                    ));
                 }
                 for mix in &cfg.mixes {
                     for (i, _target) in mix.sinks.iter().enumerate() {

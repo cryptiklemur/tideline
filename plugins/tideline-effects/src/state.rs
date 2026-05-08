@@ -41,6 +41,13 @@ pub struct EffectsState {
     /// state from `AppConfig.plugin_data`. Guards against repeated full
     /// rebuilds on every subsequent contribute call.
     pub appconfig_synced: std::sync::atomic::AtomicBool,
+    /// Set once `set_catalog` has been called with the LV2 plugin catalog.
+    /// Contribute requests can race ahead of `on_ready`'s discovery scan;
+    /// the contributor must `wait_for_catalog().await` before any
+    /// `apply_persisted_chains` call so `add_effect` finds the plugin URI
+    /// in the catalog instead of failing with "plugin not in catalog".
+    pub catalog_ready: std::sync::atomic::AtomicBool,
+    pub catalog_ready_notify: tokio::sync::Notify,
 }
 
 impl EffectsState {
@@ -55,6 +62,8 @@ impl EffectsState {
             catalog: Mutex::new(Vec::new()),
             suppress_save: std::sync::atomic::AtomicBool::new(false),
             appconfig_synced: std::sync::atomic::AtomicBool::new(false),
+            catalog_ready: std::sync::atomic::AtomicBool::new(false),
+            catalog_ready_notify: tokio::sync::Notify::new(),
         })
     }
 
@@ -72,6 +81,29 @@ impl EffectsState {
 
     pub async fn set_catalog(&self, infos: Vec<PluginInfo>) {
         *self.catalog.lock().await = infos;
+        self.catalog_ready
+            .store(true, std::sync::atomic::Ordering::Release);
+        self.catalog_ready_notify.notify_waiters();
+    }
+
+    /// Block until `set_catalog` has run at least once. Used by the
+    /// pipewire contributor: contribute_request RPCs can land before
+    /// `discovery::run_first_boot` populates the catalog, so the
+    /// contributor's first-call `apply_persisted_chains` would otherwise
+    /// see an empty catalog and fail to attach every persisted effect.
+    pub async fn wait_for_catalog(&self) {
+        loop {
+            if self.catalog_ready.load(std::sync::atomic::Ordering::Acquire) {
+                return;
+            }
+            let notified = self.catalog_ready_notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            if self.catalog_ready.load(std::sync::atomic::Ordering::Acquire) {
+                return;
+            }
+            notified.await;
+        }
     }
 
     pub async fn catalog_clone(&self) -> Vec<PluginInfo> {
