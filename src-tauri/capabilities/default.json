@@ -10,6 +10,7 @@
     "core:window:allow-minimize",
     "core:window:allow-hide",
     "opener:default",
-    "global-shortcut:default"
+    "global-shortcut:default",
+    "pilot:default"
   ]
 }

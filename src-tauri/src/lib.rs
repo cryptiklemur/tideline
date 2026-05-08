@@ -2166,11 +2166,18 @@ pub fn run() {
         config: Mutex::new(cfg),
     };
 
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         .register_uri_scheme_protocol("tideline-plugin", |ctx, req| {
             plugins::handle_request(ctx, req)
         })
-        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_opener::init());
+
+    #[cfg(debug_assertions)]
+    {
+        builder = builder.plugin(tauri_plugin_pilot::init());
+    }
+
+    builder
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| {

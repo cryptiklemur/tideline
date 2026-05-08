@@ -42,4 +42,5 @@ dirs = "5"
 notify-rust = "4"
 async-trait = { workspace = true }
 uuid = { workspace = true }
+tauri-plugin-pilot = { git = "https://github.com/mpiton/tauri-pilot" }
 
