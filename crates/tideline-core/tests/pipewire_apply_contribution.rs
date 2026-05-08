@@ -47,6 +47,7 @@ fn rewire_loopback_replaces_capture_node() {
     match cap {
         ArgValue::Literal(s) | ArgValue::Quoted(s) => assert!(s.contains("custom_capture")),
         ArgValue::Group(_) => panic!("expected leaf, got nested group"),
+        ArgValue::Array(_) => panic!("expected leaf, got array"),
     }
 }
 

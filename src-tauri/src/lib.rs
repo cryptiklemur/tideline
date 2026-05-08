@@ -609,232 +609,15 @@ pub fn build_mix_mutes(cfg: &tideline_core::model::AppConfig) -> Vec<tideline_sd
 }
 
 
-/// Find a pipewire module's object ID by the `node.name` property of one
-/// of its created nodes. Used to destroy a single loopback module without
-/// restarting pipewire.
-///
-/// Strategy: `pw-cli ls Module` lists modules with their args. The args
-/// for a loopback include `capture.props { ... node.name = "..." }` and
-/// `playback.props { ... node.name = "..." }`. We grep for the matching
-/// node.name and walk back to the enclosing module ID.
-///
-/// Returns None if no module matches (already destroyed, never created,
-/// pipewire not running, etc.).
-fn pw_find_module_by_node_name(node_name: &str) -> Option<u32> {
-    // Grep both Module list and Node list; modules expose Node objects we
-    // can match by their object.serial → match the parent module id.
-    // Easier path: list nodes filtered by node.name, read object.serial,
-    // look up which module owns it. But pw-cli's tree output is awkward
-    // to parse. Easiest reliable path: ls Module, regex for the node.name
-    // inside the module body.
-    let out = Command::new("pw-cli").args(["ls", "Module"]).output().ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let body = String::from_utf8_lossy(&out.stdout);
-    // pw-cli ls Module dumps blocks like:
-    //   id 56, type PipeWire:Interface:Module/3
-    //     ...
-    //     module.name = "libpipewire-module-loopback"
-    //     module.args = "{ capture.props = { node.name = \"playback.foo-...\" ..."
-    // We split by "id " at line start to get one block per module.
-    let mut current_id: Option<u32> = None;
-    for line in body.lines() {
-        let trimmed = line.trim_start();
-        if let Some(rest) = trimmed.strip_prefix("id ") {
-            // "id 56, type PipeWire:Interface:Module/3"
-            if let Some(comma) = rest.find(',') {
-                if let Ok(id) = rest[..comma].parse::<u32>() {
-                    current_id = Some(id);
-                }
-            }
-        }
-        if let Some(id) = current_id {
-            let needle = format!("node.name = \\\"{node_name}\\\"");
-            if line.contains(&needle) {
-                return Some(id);
-            }
-        }
-    }
-    None
-}
 
-/// Destroy a loaded pipewire module by its object ID. Returns true on
-/// success, false on failure (logged). No-op if id is None.
-fn pw_destroy_module(id: u32) -> bool {
-    let out = Command::new("pw-cli")
-        .args(["destroy", &id.to_string()])
-        .output();
-    match out {
-        Ok(o) if o.status.success() => true,
-        Ok(o) => {
-            eprintln!(
-                "[pw-mute] pw-cli destroy {id} failed: {}",
-                String::from_utf8_lossy(&o.stderr).trim()
-            );
-            false
-        }
-        Err(e) => {
-            eprintln!("[pw-mute] pw-cli destroy {id} spawn failed: {e}");
-            false
-        }
-    }
-}
 
-/// Load a libpipewire-module-loopback instance with the given inline
-/// args. The args string must already be wrapped in `{ ... }` and use
-/// pipewire's spa-json syntax (matches what
-/// `tideline-core::pipewire::serialize` emits inline).
-fn pw_load_loopback(inline_args: &str) -> bool {
-    let out = Command::new("pw-cli")
-        .args(["load-module", "libpipewire-module-loopback", inline_args])
-        .output();
-    match out {
-        Ok(o) if o.status.success() => true,
-        Ok(o) => {
-            eprintln!(
-                "[pw-mute] pw-cli load-module loopback failed: {}\nargs: {inline_args}",
-                String::from_utf8_lossy(&o.stderr).trim()
-            );
-            false
-        }
-        Err(e) => {
-            eprintln!("[pw-mute] pw-cli load-module spawn failed: {e}");
-            false
-        }
-    }
-}
 
-/// Build the inline args string for a single post-loopback. Mirrors
-/// what the conf builder (base topology or effects contributor) would
-/// emit for that (channel, mix, sink_idx) triple. `capture_target` is
-/// either the channel's fx node (when an effects chain is live) or its
-/// raw source (physical_source for PhysicalInput, channel sink for
-/// Output) — the caller picks the right one. When capture_target is
-/// the fx_node JACK client we add `node.autoconnect = false` to match
-/// the conf-emitted version; pipewire can't autoconnect to JACK clients
-/// (media.class=null) and a true autoconnect leaves the capture port
-/// dangling, so wire_fx_links has to explicitly pw-link it afterward.
-fn build_post_loopback_args(
-    channel: &tideline_core::model::ChannelCfg,
-    mix: &tideline_core::model::Mix,
-    sink_idx: usize,
-    sink_target: &str,
-    capture_target: &str,
-) -> String {
-    let s = slug(&channel.name);
-    let cap_name = format!("capture.{}-{}-{}", s, mix.id, sink_idx);
-    let pb_name = format!("playback.{}-{}-{}", s, mix.id, sink_idx);
-    let capture_autoconnect = if capture_target.starts_with("tideline-fx-") {
-        " node.autoconnect = false stream.dont-remix = true"
-    } else {
-        " stream.dont-remix = true"
-    };
-    format!(
-        "{{ capture.props = {{ node.name = \"{cap_name}\" target.object = \"{capture_target}\" audio.position = \"FL,FR\"{capture_autoconnect} }} playback.props = {{ node.name = \"{pb_name}\" target.object = \"{sink_target}\" audio.position = \"FL,FR\" }} }}"
-    )
-}
 
-fn apply_mute_via_pw_cli(
-    cfg: &AppConfig,
-    channel_name: &str,
-    mix_id: Option<&str>,
-    effective_muted_for: impl Fn(&str) -> bool,
-) {
-    let Some(channel) = cfg.channels.iter().find(|c| c.name == channel_name) else {
-        eprintln!("[pw-mute] no channel named {channel_name}");
-        return;
-    };
-    use tideline_core::model::ChannelKind;
-    if !matches!(channel.kind, ChannelKind::PhysicalInput | ChannelKind::Output) {
-        return;
-    }
-    // Whether this channel has a live effects chain. Mirrors
-    // `chain_should_apply` in the effects plugin contributor: any
-    // non-bypassed effect means audio routes through the fx_node, so
-    // post-loopbacks must capture from there. Otherwise we capture
-    // from the channel's raw source (physical mic / channel sink).
-    let has_live_chain = channel
-        .plugin_data
-        .get("tideline-effects")
-        .and_then(|v| v.get("effects"))
-        .and_then(|e| e.as_array())
-        .map(|effects| {
-            effects.iter().any(|e| {
-                !e.get("bypassed")
-                    .and_then(|b| b.as_bool())
-                    .unwrap_or(false)
-            })
-        })
-        .unwrap_or(false);
-    let chain_bypassed = channel
-        .plugin_data
-        .get("tideline-effects")
-        .and_then(|v| v.get("chain_bypassed"))
-        .and_then(|b| b.as_bool())
-        .unwrap_or(false);
-    let chain_active = has_live_chain && !chain_bypassed;
-    let capture_target = if chain_active {
-        format!("tideline-fx-{}", channel.uuid.simple())
-    } else {
-        match channel.kind {
-            ChannelKind::PhysicalInput => channel.physical_source.clone(),
-            ChannelKind::Output => {
-                // Mirror sink_node_for_channel logic.
-                channel
-                    .hp_node
-                    .strip_prefix("playback.")
-                    .and_then(|s| s.strip_suffix("-hp"))
-                    .map(|s| format!("sink.{}", s))
-                    .unwrap_or_else(|| format!("sink.{}", slug(&channel.name)))
-            }
-            ChannelKind::Input => unreachable!(),
-        }
-    };
-    let mixes_to_apply: Vec<&tideline_core::model::Mix> = match mix_id {
-        Some(id) => cfg.mixes.iter().filter(|m| m.id == id).collect(),
-        None => cfg.mixes.iter().collect(),
-    };
-    for mix in mixes_to_apply {
-        let muted = effective_muted_for(&mix.id);
-        for (i, target) in mix.sinks.iter().enumerate() {
-            let pb_name = format!(
-                "playback.{}-{}-{}",
-                slug(&channel.name),
-                mix.id,
-                i
-            );
-            if muted {
-                if let Some(id) = pw_find_module_by_node_name(&pb_name) {
-                    let ok = pw_destroy_module(id);
-                    eprintln!(
-                        "[pw-mute] mute {} ch={} mix={} sink_idx={} -> destroy module id={id} ok={ok}",
-                        pb_name, channel.name, mix.id, i
-                    );
-                } else {
-                    eprintln!(
-                        "[pw-mute] mute {} ch={} mix={} sink_idx={} -> no module found (already destroyed?)",
-                        pb_name, channel.name, mix.id, i
-                    );
-                }
-            } else {
-                if pw_find_module_by_node_name(&pb_name).is_some() {
-                    eprintln!(
-                        "[pw-mute] unmute {} ch={} mix={} sink_idx={} -> already loaded",
-                        pb_name, channel.name, mix.id, i
-                    );
-                    continue;
-                }
-                let args = build_post_loopback_args(channel, mix, i, target, &capture_target);
-                let ok = pw_load_loopback(&args);
-                eprintln!(
-                    "[pw-mute] unmute {} ch={} mix={} sink_idx={} cap={} -> load-module ok={ok}",
-                    pb_name, channel.name, mix.id, i, capture_target
-                );
-            }
-        }
-    }
-}
+
+
+
+
+
 
 fn write_all_volumes(map: &HashMap<String, ChannelVolumes>) {
     let path = volumes_path();
@@ -863,15 +646,16 @@ fn sink_input_indexes_for_channel_mix(channel_slug: &str, mix_id: &str) -> Vec<u
 }
 
 fn apply_channel_volumes(app: &AppHandle, channel_slug: &str, vols: &ChannelVolumes, mix_ids: &[String]) {
-    // Volumes only. Mute is enforced at the pipewire conf level by
-    // skipping the post-loopback for muted (channel, mix) pairs (see
-    // set_channel_mix_mute / build_mix_mutes / pipewire_contributor).
-    // pulse sink-input mute did not propagate reliably to pw-native
-    // loopback streams, so trying to mute here was a no-op or worse.
+    // Mute is enforced here by clamping the post-loopback's playback
+    // sink-input volume to 0%. pulse `set-sink-input-mute` did not
+    // propagate reliably to pw-native loopback streams, but volume does.
+    // master_muted OR per-mix muted -> 0%, otherwise master*mix.
     let snapshot = fetch_sink_inputs();
     for mix_id in mix_ids {
         let mix_pct = vols.mixes.get(mix_id).copied().unwrap_or(100);
-        let final_pct = product_pct(vols.master, mix_pct);
+        let muted = vols.master_muted
+            || vols.mix_muted.get(mix_id).copied().unwrap_or(false);
+        let final_pct = if muted { 0 } else { product_pct(vols.master, mix_pct) };
         let prefix = format!("playback.{}-{}-", channel_slug, mix_id);
         let indexes: Vec<u32> = snapshot
             .iter()
@@ -958,31 +742,11 @@ fn set_channel_master_mute(
     let entry = all.entry(channel.clone()).or_default();
     entry.master_muted = muted;
     let snap = entry.clone();
-    let mix_muted_snap = entry.mix_muted.clone();
     write_all_volumes(&all);
-    // Master mute affects every mix the channel routes to. Targeted
-    // pw-cli toggles every post-loopback for this channel — no restart.
-    apply_mute_via_pw_cli(&cfg, &channel, None, |mid| {
-        muted || mix_muted_snap.get(mid).copied().unwrap_or(false)
-    });
-    // Background conf rewrite so next pipewire restart preserves state,
-    // plus a wire_fx_links pass for any post-loopbacks just (re)loaded
-    // by the pw-cli path that target the fx_node — those carry
-    // node.autoconnect=false and need an explicit pw-link.
-    let cfg_for_conf = cfg.clone();
-    let registry_opt = app
-        .try_state::<Arc<tideline_host::PluginRegistry>>()
-        .map(|s| s.inner().clone());
-    if let Some(registry) = registry_opt {
-        tauri::async_runtime::spawn(async move {
-            if let Err(e) = write_pipewire_conf_only(&cfg_for_conf, &registry).await {
-                eprintln!("[pw-mute] conf rewrite failed: {e}");
-            }
-            wire_fx_links(&cfg_for_conf).await;
-        });
-    }
+    // Apply mute by clamping volume to 0% on every post-loopback's
+    // playback sink-input — see apply_channel_volumes. No conf rewrite,
+    // no module destroy/load, no pipewire restart.
     apply_channel_volumes(&app, &slug(&channel), &snap, &mix_ids);
-    // Mirror the master mute UI event onto every mix's sink-inputs.
     for mix_id in &mix_ids {
         for idx in sink_input_indexes_for_channel_mix(&slug(&channel), mix_id) {
             emit_sink_input_mute(&app, idx, muted);
@@ -993,38 +757,20 @@ fn set_channel_master_mute(
 #[tauri::command]
 fn set_channel_mix_mute(app: AppHandle, channel: String, mix_id: String, muted: bool, state: State<'_, AppState>) {
     let cfg = state.config.lock().unwrap().clone();
+    let mix_ids: Vec<String> = cfg.mixes.iter().map(|m| m.id.clone()).collect();
     let mut all = read_all_volumes();
     let entry = all.entry(channel.clone()).or_default();
     entry.mix_muted.insert(mix_id.clone(), muted);
     let master_muted = entry.master_muted;
-    let mix_muted_snap = entry.mix_muted.clone();
+    let snap = entry.clone();
     let effective = master_muted || muted;
     write_all_volumes(&all);
-    // Immediate effect: targeted pw-cli load/destroy of the affected
-    // mix's post-loopback. NO pipewire restart, just that one mix's
-    // audio path toggles.
-    apply_mute_via_pw_cli(&cfg, &channel, Some(&mix_id), |mid| {
-        master_muted || mix_muted_snap.get(mid).copied().unwrap_or(false)
-    });
-    // Background: rewrite the pipewire conf so next pipewire restart
-    // starts in the correct state. NO restart triggered — the running
-    // graph already matches via the pw-cli calls above. Also re-runs
-    // wire_fx_links so any unmuted-just-now post-loopback targeting
-    // fx_node gets pw-linked (the runtime-loaded version has
-    // node.autoconnect=false to match the conf-emitted version).
-    let cfg_for_conf = cfg.clone();
-    let registry_opt = app
-        .try_state::<Arc<tideline_host::PluginRegistry>>()
-        .map(|s| s.inner().clone());
-    if let Some(registry) = registry_opt {
-        tauri::async_runtime::spawn(async move {
-            if let Err(e) = write_pipewire_conf_only(&cfg_for_conf, &registry).await {
-                eprintln!("[pw-mute] conf rewrite failed: {e}");
-            }
-            wire_fx_links(&cfg_for_conf).await;
-        });
-    }
-    // UI-facing event so strip mute indicators update immediately.
+    // Apply mute by clamping volume to 0% on this mix's post-loopback
+    // sink-inputs — see apply_channel_volumes. No conf rewrite, no
+    // module destroy/load, no pipewire restart. We pass all mix_ids so
+    // master+mix combinations recompute correctly across every mix on
+    // this channel.
+    apply_channel_volumes(&app, &slug(&channel), &snap, &mix_ids);
     for idx in sink_input_indexes_for_channel_mix(&slug(&channel), &mix_id) {
         emit_sink_input_mute(&app, idx, effective);
     }
@@ -1223,14 +969,12 @@ pub async fn write_pipewire_and_restart(
 /// Creates explicit pipewire links between fx loopbacks and per-channel JACK
 /// clients (`tideline-fx-{simple_uuid}`). Idempotent — pw-link returns
 /// "File exists" on duplicate links, which we silently swallow.
+///
+/// Port naming: pipewire's `module-loopback` always names its ports
+/// numerically (`input_0`, `input_1`, `output_0`, `output_1`) regardless
+/// of `audio.position`. JACK clients expose channel-named ports
+/// (`in_FL`, `in_FR`, `out_FL`, `out_FR`).
 pub async fn wire_fx_links(cfg: &AppConfig) {
-    let mix_mutes = build_mix_mutes(cfg);
-    let is_muted = |ch: &str, mix_id: &str| -> bool {
-        mix_mutes
-            .iter()
-            .any(|m| m.muted && m.channel_name == ch && m.mix_id == mix_id)
-    };
-
     let mut pairs: Vec<(String, String)> = Vec::new();
     for ch in &cfg.channels {
         let effects_data = ch.plugin_data.get("tideline-effects");
@@ -1262,22 +1006,22 @@ pub async fn wire_fx_links(cfg: &AppConfig) {
         match ch.kind {
             ChannelKind::Output | ChannelKind::PhysicalInput => {
                 pairs.push((
-                    format!("playback.{s}-fx-pre:output_FL"),
+                    format!("playback.{s}-fx-pre:output_0"),
                     format!("{fx}:in_FL"),
                 ));
                 pairs.push((
-                    format!("playback.{s}-fx-pre:output_FR"),
+                    format!("playback.{s}-fx-pre:output_1"),
                     format!("{fx}:in_FR"),
                 ));
             }
             ChannelKind::Input => {
                 for i in 0..ch.sources.len() {
                     pairs.push((
-                        format!("playback.{s}-fx-src-{i}:output_FL"),
+                        format!("playback.{s}-fx-src-{i}:output_0"),
                         format!("{fx}:in_FL"),
                     ));
                     pairs.push((
-                        format!("playback.{s}-fx-src-{i}:output_FR"),
+                        format!("playback.{s}-fx-src-{i}:output_1"),
                         format!("{fx}:in_FR"),
                     ));
                 }
@@ -1289,32 +1033,29 @@ pub async fn wire_fx_links(cfg: &AppConfig) {
                 if matches!(ch.kind, ChannelKind::PhysicalInput) {
                     pairs.push((
                         format!("{fx}:out_FL"),
-                        format!("capture.{s}-fx-virtual:input_FL"),
+                        format!("capture.{s}-fx-virtual:input_0"),
                     ));
                     pairs.push((
                         format!("{fx}:out_FR"),
-                        format!("capture.{s}-fx-virtual:input_FR"),
+                        format!("capture.{s}-fx-virtual:input_1"),
                     ));
                 }
                 for mix in &cfg.mixes {
-                    if is_muted(&ch.name, &mix.id) {
-                        continue;
-                    }
                     for (i, _target) in mix.sinks.iter().enumerate() {
                         let cap = mix_capture_node(ch, mix, i);
-                        pairs.push((format!("{fx}:out_FL"), format!("{cap}:input_FL")));
-                        pairs.push((format!("{fx}:out_FR"), format!("{cap}:input_FR")));
+                        pairs.push((format!("{fx}:out_FL"), format!("{cap}:input_0")));
+                        pairs.push((format!("{fx}:out_FR"), format!("{cap}:input_1")));
                     }
                 }
             }
             ChannelKind::Input => {
                 pairs.push((
                     format!("{fx}:out_FL"),
-                    format!("capture.{s}-fx-post:input_FL"),
+                    format!("capture.{s}-fx-post:input_0"),
                 ));
                 pairs.push((
                     format!("{fx}:out_FR"),
-                    format!("capture.{s}-fx-post:input_FR"),
+                    format!("capture.{s}-fx-post:input_1"),
                 ));
             }
         }
@@ -1325,12 +1066,6 @@ pub async fn wire_fx_links(cfg: &AppConfig) {
     }
     eprintln!("[fx-link] wiring {} pw-link pairs", pairs.len());
 
-    // 30 attempts × 400ms ≈ 12s of retry budget. The previous 10×300ms
-    // (3s) would expire before tideline-effects finished re-creating
-    // its per-channel JACK clients on a slow boot, leaving the
-    // post-loopback / fx-virtual pairs un-linked — observable as Discord
-    // hearing silence from a virtual mic source whose loopback ran but
-    // was never linked to fx_node:out.
     let mut remaining = pairs;
     let total = remaining.len();
     for attempt in 0..30 {
@@ -1347,7 +1082,6 @@ pub async fn wire_fx_links(cfg: &AppConfig) {
                 Ok(o) => {
                     let stderr = String::from_utf8_lossy(&o.stderr);
                     if stderr.contains("File exists") {
-                        // Already linked — fine.
                     } else {
                         next.push((out, inp));
                     }

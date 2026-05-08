@@ -75,7 +75,7 @@ fn replace_target_object(args: &mut Vec<(String, ArgValue)>, key: &str, new_valu
                     items.push(("target.object".into(), ArgValue::Quoted(new_value.into())));
                 }
             }
-            ArgValue::Literal(_) | ArgValue::Quoted(_) => {
+            ArgValue::Literal(_) | ArgValue::Quoted(_) | ArgValue::Array(_) => {
                 pair.1 = ArgValue::Literal(format!("target.object={}", new_value));
             }
         }

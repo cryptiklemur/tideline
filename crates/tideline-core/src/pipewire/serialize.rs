@@ -88,5 +88,15 @@ fn write_value(out: &mut String, v: &ArgValue) {
             out.push('"');
         }
         ArgValue::Group(items) => write_inline_args(out, items),
+        ArgValue::Array(items) => {
+            out.push_str("[ ");
+            for (i, item) in items.iter().enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                write_value(out, item);
+            }
+            out.push_str(" ]");
+        }
     }
 }

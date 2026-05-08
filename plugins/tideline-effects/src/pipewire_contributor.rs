@@ -152,8 +152,12 @@ pub fn build_directives_for_channel(
     ch: &ChannelCfg,
     mixes: &[Mix],
     data: &ChannelEffectsData,
-    mix_mutes: &[MixMuteEntry],
+    _mix_mutes: &[MixMuteEntry],
 ) -> Vec<PipewireDirective> {
+    // Mute is no longer enforced at the conf level — post-loopbacks
+    // always exist and mute is applied at runtime via
+    // `set-sink-input-volume 0%` on the playback sink-input. Keeping
+    // the parameter for signature compatibility with callers.
     let tag = RewireableTag {
         channel_uuid: ch.uuid.to_string(),
         role: role_for_kind(ch.kind).into(),
@@ -163,8 +167,6 @@ pub fn build_directives_for_channel(
         return Vec::new();
     }
 
-    // Skip bypassed effects — if every effect is bypassed we tear down loopbacks
-    // and let the host's normal routing stay in place.
     let chain: Vec<&Effect> = data.effects.iter().filter(|e| !e.bypassed).collect();
     if chain.is_empty() {
         return vec![PipewireDirective::DestroyModule { target_tag: tag }];
@@ -173,18 +175,11 @@ pub fn build_directives_for_channel(
     let s = slug(&ch.name);
     let fx_node = channel_jack_client(ch.uuid);
 
-    let is_muted_for_mix = |mix_id: &str| -> bool {
-        mix_mutes
-            .iter()
-            .any(|m| m.muted && m.channel_name == ch.name && m.mix_id == mix_id)
-    };
-
     let mut out = Vec::new();
     out.push(PipewireDirective::DestroyModule {
         target_tag: tag.clone(),
     });
 
-    // PRE-LOOPBACK: source(s) → tideline-fx-{slug}
     match ch.kind {
         ChannelKind::Output => {
             let sink_name = sink_node_for_channel(ch);
@@ -192,7 +187,7 @@ pub fn build_directives_for_channel(
                 vec![
                     ("node.name".into(), quoted(format!("capture.{s}-fx-pre"))),
                     ("target.object".into(), quoted(&sink_name)),
-                    ("audio.position".into(), quoted("FL,FR")),
+                    ("audio.position".into(), fl_fr()),
                     ("stream.dont-remix".into(), literal("true")),
                     ("stream.capture.sink".into(), literal("true")),
                 ],
@@ -200,7 +195,7 @@ pub fn build_directives_for_channel(
                     ("node.name".into(), quoted(format!("playback.{s}-fx-pre"))),
                     ("target.object".into(), quoted(&fx_node)),
                     ("node.autoconnect".into(), literal("false")),
-                    ("audio.position".into(), quoted("FL,FR")),
+                    ("audio.position".into(), fl_fr()),
                 ],
                 Some(tag.clone()),
             ));
@@ -211,14 +206,14 @@ pub fn build_directives_for_channel(
                     vec![
                         ("node.name".into(), quoted(format!("capture.{s}-fx-src-{i}"))),
                         ("target.object".into(), quoted(src)),
-                        ("audio.position".into(), quoted("FL,FR")),
+                        ("audio.position".into(), fl_fr()),
                         ("stream.dont-remix".into(), literal("true")),
                     ],
                     vec![
                         ("node.name".into(), quoted(format!("playback.{s}-fx-src-{i}"))),
                         ("target.object".into(), quoted(&fx_node)),
                         ("node.autoconnect".into(), literal("false")),
-                        ("audio.position".into(), quoted("FL,FR")),
+                        ("audio.position".into(), fl_fr()),
                     ],
                     Some(tag.clone()),
                 ));
@@ -229,29 +224,22 @@ pub fn build_directives_for_channel(
                 vec![
                     ("node.name".into(), quoted(format!("capture.{s}-fx-pre"))),
                     ("target.object".into(), quoted(&ch.physical_source)),
-                    ("audio.position".into(), quoted("FL,FR")),
+                    ("audio.position".into(), fl_fr()),
                     ("stream.dont-remix".into(), literal("true")),
                 ],
                 vec![
                     ("node.name".into(), quoted(format!("playback.{s}-fx-pre"))),
                     ("target.object".into(), quoted(&fx_node)),
                     ("node.autoconnect".into(), literal("false")),
-                    ("audio.position".into(), quoted("FL,FR")),
+                    ("audio.position".into(), fl_fr()),
                 ],
                 Some(tag.clone()),
             ));
         }
     }
 
-    // POST-LOOPBACK: tideline-fx-{slug} → destination(s)
-    // Skip post-loopbacks for mixes flagged as muted — that's how per-mix
-    // mute is enforced. No loopback = no audio path = silence in that mix.
     match ch.kind {
         ChannelKind::Output | ChannelKind::PhysicalInput => {
-            // Virtual FX source for PhysicalInput, capture from fx_node
-            // so apps see the post-effects audio. Replaces the
-            // physical_source-rooted virtual source from base topology
-            // (same rewireable tag → DestroyModule cleared it above).
             if matches!(ch.kind, ChannelKind::PhysicalInput) {
                 let virt_cap = format!("capture.{s}-fx-virtual");
                 let virt_pb = format!("playback.{s}-fx-source");
@@ -261,23 +249,20 @@ pub fn build_directives_for_channel(
                         ("node.name".into(), quoted(virt_cap)),
                         ("target.object".into(), quoted(&fx_node)),
                         ("node.autoconnect".into(), literal("false")),
-                        ("audio.position".into(), quoted("FL,FR")),
+                        ("audio.position".into(), fl_fr()),
                         ("stream.dont-remix".into(), literal("true")),
                     ],
                     vec![
                         ("node.name".into(), quoted(virt_pb)),
                         ("node.description".into(), quoted(&virt_desc)),
                         ("media.class".into(), quoted("Audio/Source/Virtual")),
-                        ("audio.position".into(), quoted("FL,FR")),
+                        ("audio.position".into(), fl_fr()),
                     ],
                     Some(tag.clone()),
                 ));
             }
 
             for mix in mixes {
-                if is_muted_for_mix(&mix.id) {
-                    continue;
-                }
                 for (i, target) in mix.sinks.iter().enumerate() {
                     let cap = mix_capture_node(ch, mix, i);
                     let pb = mix_playback_node(ch, mix, i);
@@ -286,13 +271,13 @@ pub fn build_directives_for_channel(
                             ("node.name".into(), quoted(cap)),
                             ("target.object".into(), quoted(&fx_node)),
                             ("node.autoconnect".into(), literal("false")),
-                            ("audio.position".into(), quoted("FL,FR")),
+                            ("audio.position".into(), fl_fr()),
                             ("stream.dont-remix".into(), literal("true")),
                         ],
                         vec![
                             ("node.name".into(), quoted(pb)),
                             ("target.object".into(), quoted(target)),
-                            ("audio.position".into(), quoted("FL,FR")),
+                            ("audio.position".into(), fl_fr()),
                         ],
                         Some(tag.clone()),
                     ));
@@ -306,13 +291,13 @@ pub fn build_directives_for_channel(
                     ("node.name".into(), quoted(format!("capture.{s}-fx-post"))),
                     ("target.object".into(), quoted(&fx_node)),
                     ("node.autoconnect".into(), literal("false")),
-                    ("audio.position".into(), quoted("FL,FR")),
+                    ("audio.position".into(), fl_fr()),
                     ("stream.dont-remix".into(), literal("true")),
                 ],
                 vec![
                     ("node.name".into(), quoted(format!("playback.{s}-fx-post"))),
                     ("target.object".into(), quoted(&sink_name)),
-                    ("audio.position".into(), quoted("FL,FR")),
+                    ("audio.position".into(), fl_fr()),
                 ],
                 Some(tag.clone()),
             ));
@@ -341,6 +326,10 @@ fn quoted(s: impl Into<String>) -> ArgValue {
 }
 fn literal(s: impl Into<String>) -> ArgValue {
     ArgValue::Literal(s.into())
+}
+
+fn fl_fr() -> ArgValue {
+    ArgValue::Quoted("FL,FR".into())
 }
 
 #[cfg(test)]

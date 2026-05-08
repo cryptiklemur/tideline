@@ -31,10 +31,16 @@ pub enum LoadModuleHeader {
 pub enum ArgValue {
     /// Bareword (no quotes): factory names, enum-like literals, booleans.
     Literal(String),
-    /// Quoted string: node names, descriptions, channel positions.
+    /// Quoted string: node names, descriptions.
     Quoted(String),
     /// Nested `{ ... }` block: capture.props / playback.props.
     Group(Vec<(String, ArgValue)>),
+    /// Array literal `[ v1, v2, ... ]`. Required for canonical channel
+    /// positions: `audio.position = [ FL, FR ]`. The quoted-string form
+    /// `"FL,FR"` is non-canonical and pipewire silently falls back to
+    /// generic numeric port names (input_0/1 instead of input_FL/FR),
+    /// breaking pw-link lookups by channel name.
+    Array(Vec<ArgValue>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
