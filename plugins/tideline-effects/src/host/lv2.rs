@@ -317,6 +317,13 @@ impl Plugin for Lv2Plugin {
         if let Err(e) = unsafe { self.instance.run(frames, ports) } {
             tracing::warn!(error = ?e, plugin = %self.info.uri, "lv2 run failed");
         }
+        // Mono plugin in a stereo chain: only out_l was written above.
+        // Duplicate it to out_r so downstream effects (and the channel
+        // process callback's mix loopbacks) see signal on both channels
+        // instead of stale scratch data.
+        if n_out == 1 {
+            out_r[..frames].copy_from_slice(&out_l[..frames]);
+        }
         // Forward plugin → UI feedback (atoms + control outputs) so suil can
         // drive meters and graphs. try_send keeps the audio thread non-
         // blocking — slow UIs drop events rather than stall the callback.
