@@ -14,7 +14,7 @@ export type UiNode =
     | { kind: 'slider'; id: string; label?: string; min: number; max: number; step?: number; value: number; suffix?: string }
     | { kind: 'input'; id: string; label?: string; placeholder?: string; value: string }
     | { kind: 'select'; id: string; label?: string; value: string; options: { value: string; label: string }[] }
-    | { kind: 'button'; id: string; text: string; icon?: UiIconRef; variant?: 'soft' | 'primary' | 'ghost' | 'warning'; disabled?: boolean }
+    | { kind: 'button'; id: string; text: string; icon?: UiIconRef; variant?: 'soft' | 'primary' | 'ghost' | 'warning' | 'success'; disabled?: boolean }
     | { kind: 'list'; id: string; items: { id: string; label: string; icon?: UiIconRef }[]; sortable?: boolean }
     | { kind: 'binding_capture'; id: string; label: string; sublabel?: string; binding: Binding | null }
     | { kind: 'banner'; id: string; tone: 'info' | 'success' | 'warning' | 'error'; text: string }
@@ -23,7 +23,7 @@ export type UiNode =
     | { kind: 'icon_picker'; id: string; label?: string; value: string; choices: string[] }
     | { kind: 'iframe'; id: string; src_id: string; height?: number }
     | { kind: 'tabs'; id: string; active_tab_id?: string; tabs: { id: string; label: string; content: UiNode }[] }
-    | { kind: 'menu_button'; id: string; text: string; icon?: UiIconRef; variant?: 'soft' | 'primary' | 'ghost' | 'warning'; items: UiMenuItem[] };
+    | { kind: 'menu_button'; id: string; text: string; icon?: UiIconRef; variant?: 'soft' | 'primary' | 'ghost' | 'warning' | 'success'; items: UiMenuItem[] };
 
 export type UiMenuItem =
     | { id: string; label: string; icon?: UiIconRef; disabled?: boolean }

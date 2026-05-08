@@ -127,12 +127,11 @@ impl EffectsState {
                 .insert((channel_id, eid), ChainSlot { effect });
         }
         {
-            self.chains
-                .lock()
-                .await
-                .entry(channel_id)
-                .or_default()
-                .push(eid);
+            let mut chains = self.chains.lock().await;
+            let order = chains.entry(channel_id).or_default();
+            if !order.contains(&eid) {
+                order.push(eid);
+            }
         }
         crate::persist::save_chains_to_disk(self).await;
     }
@@ -301,7 +300,20 @@ pub async fn apply_persisted_chains(
     let mut any_failed = false;
     for (channel_id, ch) in persisted.channels {
         state.set_chain_bypass(channel_id, ch.bypassed).await;
+        // Dedupe by effect id before applying. attach_effect will skip
+        // duplicates in chain_order, but engine.add_plugin would still
+        // be called twice and could enter a bad state. Persisted files
+        // from older bug-prone builds can carry the same id twice.
+        let mut seen = std::collections::HashSet::new();
+        let mut deduped: Vec<crate::effect::Effect> = Vec::with_capacity(ch.effects.len());
         for effect in ch.effects {
+            if seen.insert(effect.id) {
+                deduped.push(effect);
+            } else {
+                tracing::warn!(?channel_id, effect_id = %effect.id, "apply_persisted_chains: dropping duplicate effect entry");
+            }
+        }
+        for effect in deduped {
             let effect_id = effect.id;
             let bypassed = effect.bypassed;
             tracing::info!(?channel_id, ?effect_id, "applying persisted effect");

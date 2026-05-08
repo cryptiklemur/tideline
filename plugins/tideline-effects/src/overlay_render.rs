@@ -101,7 +101,7 @@ pub async fn handle_overlay_event(
 }
 
 pub(crate) fn channel_card_tree(has_fx: bool) -> Value {
-    let variant = if has_fx { "primary" } else { "ghost" };
+    let variant = if has_fx { "success" } else { "ghost" };
     json!({
         "kind": "row",
         "id": "effects-channel-card-row",

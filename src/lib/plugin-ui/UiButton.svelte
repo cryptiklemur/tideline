@@ -11,6 +11,7 @@ let isIconOnly = $derived(!!node.icon && (!node.text || node.text.length === 0))
 let cls = $derived(
     (node.variant === 'primary' ? 'btn btn-primary btn-sm' :
         node.variant === 'warning' ? 'btn btn-warning btn-sm' :
+        node.variant === 'success' ? 'btn btn-success btn-soft btn-sm' :
         node.variant === 'ghost' ? 'btn btn-ghost btn-sm' :
         'btn btn-soft btn-sm') + (isIconOnly ? ' btn-square' : '')
 );

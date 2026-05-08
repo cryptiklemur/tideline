@@ -380,7 +380,7 @@ function segmentColor(i: number): string {
                         if (channelUuid) onOpenRack?.(o.plugin_id, channelUuid);
                     }}
                 >
-                    <ChannelOverlay overlay={o} emit={(ev) => onOverlayEmit?.(o.plugin_id, ev)} />
+                    <ChannelOverlay overlay={o} channelUuid={channelUuid} emit={(ev) => onOverlayEmit?.(o.plugin_id, ev)} />
                 </div>
             {/each}
             <button
