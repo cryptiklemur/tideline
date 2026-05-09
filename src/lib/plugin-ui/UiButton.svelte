@@ -20,6 +20,7 @@ let cls = $derived(
 <button
     class="{cls} gap-1"
     disabled={node.disabled}
+    title={node.tooltip ?? undefined}
     onclick={() => emit({ surface_id: surfaceId, node_id: node.id, value: { type: 'click' } })}
 >
     {#if node.icon}<UiIcon node={{ kind: 'icon', id: node.id + ':icon', icon: node.icon, size: 12 }} />{/if}

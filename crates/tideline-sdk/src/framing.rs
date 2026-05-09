@@ -19,7 +19,10 @@ pub async fn read_frame<R: AsyncRead + Unpin>(r: &mut R) -> io::Result<Option<Ve
             return if header.is_empty() {
                 Ok(None)
             } else {
-                Err(io::Error::new(io::ErrorKind::UnexpectedEof, "eof mid-header"))
+                Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    format!("eof mid-header (got {})", sample_bytes(&header)),
+                ))
             };
         }
         header.push(byte[0]);
@@ -27,27 +30,52 @@ pub async fn read_frame<R: AsyncRead + Unpin>(r: &mut R) -> io::Result<Option<Ve
             break;
         }
         if header.len() > 4096 {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "header too large"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("header too large (first 128: {})", sample_bytes(&header)),
+            ));
         }
     }
-    let header_str = std::str::from_utf8(&header)
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "non-utf8 header"))?;
+    let header_str = std::str::from_utf8(&header).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("non-utf8 header ({})", sample_bytes(&header)),
+        )
+    })?;
     let mut len: Option<usize> = None;
     for line in header_str.split("\r\n") {
-        if line.is_empty() { continue; }
-        let (k, v) = line.split_once(": ")
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "bad header line"))?;
+        if line.is_empty() {
+            continue;
+        }
+        let (k, v) = line.split_once(": ").ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("bad header line ({})", sample_bytes(line.as_bytes())),
+            )
+        })?;
         if k.eq_ignore_ascii_case("Content-Length") {
-            len = Some(v.trim().parse().map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "bad length"))?);
+            len = Some(v.trim().parse().map_err(|_| {
+                io::Error::new(io::ErrorKind::InvalidData, format!("bad length: {v:?}"))
+            })?);
         }
     }
-    let len = len.ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "no content-length"))?;
+    let len = len.ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("no content-length (header: {})", sample_bytes(&header)),
+        )
+    })?;
     if len > MAX_FRAME_BYTES {
         return Err(io::Error::new(io::ErrorKind::InvalidData, "frame too large"));
     }
     let mut buf = vec![0u8; len];
     r.read_exact(&mut buf).await?;
     Ok(Some(buf))
+}
+
+fn sample_bytes(b: &[u8]) -> String {
+    let n = b.len().min(128);
+    String::from_utf8_lossy(&b[..n]).escape_debug().to_string()
 }
 
 #[cfg(test)]

@@ -129,7 +129,13 @@ impl HostBackend for TauriHostBackend {
             let state = app
                 .try_state::<crate::AppState>()
                 .ok_or_else(|| "attach_channel_data: AppState missing".to_string())?;
-            {
+            // Mutate then clone+drop the guard so the disk save below runs
+            // without holding the AppConfig mutex. Holding the lock across
+            // sync I/O serialized every other config reader and pushed
+            // plugin RPC round-trips past the SDK's transport timeout
+            // whenever multiple plugins called attach_channel_data within
+            // the same window.
+            let cfg_snapshot = {
                 let mut cfg = state.config.lock().unwrap();
                 let Some(channel) = cfg.channels.iter_mut().find(|c| c.uuid == channel_uuid) else {
                     return Err(format!(
@@ -137,8 +143,9 @@ impl HostBackend for TauriHostBackend {
                     ));
                 };
                 channel.plugin_data.insert(namespace.clone(), value);
-                tideline_core::config_io::save_config_to_disk(&cfg)?;
-            }
+                cfg.clone()
+            };
+            tideline_core::config_io::save_config_to_disk(&cfg_snapshot)?;
             let _ = app.emit(
                 "tideline:channel_plugin_data_changed",
                 serde_json::json!({

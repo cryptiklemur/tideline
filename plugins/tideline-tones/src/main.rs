@@ -221,10 +221,7 @@ impl Plugin for TonesPlugin {
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn main() {
-    tracing_subscriber::fmt()
-        .with_writer(std::io::stderr)
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .init();
+    let _log_guard = tideline_sdk::logging::init("tideline-tones");
     let plugin = TonesPlugin {
         cfg: Arc::new(Mutex::new(TonesConfig::default())),
         last_played_ms: Arc::new(AtomicU64::new(0)),

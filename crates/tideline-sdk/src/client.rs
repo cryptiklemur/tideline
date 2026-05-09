@@ -140,13 +140,15 @@ impl HostClient {
         ).await.map(|_| ())
     }
 
-    /// Persist plugin-owned data onto a channel record. The host stores this in
-    /// `channel.plugin_data[plugin_id]` and triggers downstream rebuilds.
     pub async fn channel_attach_data(&self, channel_uuid: Uuid, data: Value) -> Result<(), SdkTransportError> {
+        // 10s timeout: the host serializes plugin_data writes through the
+        // AppConfig mutex and a sync save_config_to_disk call. Under
+        // contention from other plugins or the pipewire rebuild path, 2s was
+        // not enough and persist_channel was timing out every 10s tick.
         self.transport.call(
             "host/channel.attach_data",
             Some(json!({"channel_uuid": channel_uuid, "data": data})),
-            Duration::from_secs(2),
+            Duration::from_secs(10),
         ).await.map(|_| ())
     }
 

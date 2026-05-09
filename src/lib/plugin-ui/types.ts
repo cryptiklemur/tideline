@@ -4,7 +4,7 @@ export type UiIconRef = { name: string };
 
 export type UiNode =
     | { kind: 'section'; id: string; title?: string; subtitle?: string; variant?: 'card'; gap?: number; children: UiNode[] }
-    | { kind: 'row'; id: string; gap?: number; align?: 'start' | 'center' | 'end'; variant?: 'card'; muted?: boolean; pad?: number; children: UiNode[] }
+    | { kind: 'row'; id: string; gap?: number; align?: 'start' | 'center' | 'end'; variant?: 'card'; muted?: boolean; pad?: number; draggable?: boolean; drop_group?: string; children: UiNode[] }
     | { kind: 'col'; id: string; gap?: number; children: UiNode[] }
     | { kind: 'label'; id: string; text: string; muted?: boolean; tooltip?: string; tooltip_placement?: 'top' | 'bottom' | 'left' | 'right'; hint?: 'dotted' | 'question' }
     | { kind: 'heading'; id: string; text: string; level?: 3 | 4 | 5 }
@@ -14,7 +14,7 @@ export type UiNode =
     | { kind: 'slider'; id: string; label?: string; min: number; max: number; step?: number; value: number; suffix?: string }
     | { kind: 'input'; id: string; label?: string; placeholder?: string; value: string }
     | { kind: 'select'; id: string; label?: string; value: string; options: { value: string; label: string }[] }
-    | { kind: 'button'; id: string; text: string; icon?: UiIconRef; variant?: 'soft' | 'primary' | 'ghost' | 'warning' | 'success'; disabled?: boolean }
+    | { kind: 'button'; id: string; text: string; icon?: UiIconRef; variant?: 'soft' | 'primary' | 'ghost' | 'warning' | 'success'; disabled?: boolean; tooltip?: string }
     | { kind: 'list'; id: string; items: { id: string; label: string; icon?: UiIconRef }[]; sortable?: boolean }
     | { kind: 'binding_capture'; id: string; label: string; sublabel?: string; binding: Binding | null }
     | { kind: 'banner'; id: string; tone: 'info' | 'success' | 'warning' | 'error'; text: string }
@@ -35,6 +35,7 @@ export type UiEventValue =
     | { type: 'string'; value: string }
     | { type: 'binding'; value: Binding | null }
     | { type: 'order'; value: string[] }
+    | { type: 'drop'; from_id: string }
     | { type: 'click' };
 
 export type UiEventContext =

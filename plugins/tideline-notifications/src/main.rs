@@ -162,10 +162,7 @@ impl Plugin for NotifPlugin {
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn main() {
-    tracing_subscriber::fmt()
-        .with_writer(std::io::stderr)
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .init();
+    let _log_guard = tideline_sdk::logging::init("tideline-notifications");
     let plugin = NotifPlugin {
         cfg: Arc::new(Mutex::new(NotifConfig::default())),
     };

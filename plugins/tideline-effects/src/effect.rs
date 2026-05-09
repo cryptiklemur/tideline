@@ -14,13 +14,33 @@ pub struct Effect {
 }
 
 /// Schema written into `channel.plugin_data["tideline-effects"]`.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChannelEffectsData {
     #[serde(default)]
     pub effects: Vec<Effect>,
     #[serde(default)]
     pub chain_bypassed: bool,
+    #[serde(default)]
+    pub lowcut: bool,
+    #[serde(default)]
+    pub clipguard: bool,
+    #[serde(default = "default_input_gain")]
+    pub input_gain: f32,
 }
+
+impl Default for ChannelEffectsData {
+    fn default() -> Self {
+        Self {
+            effects: Vec::new(),
+            chain_bypassed: false,
+            lowcut: false,
+            clipguard: false,
+            input_gain: 1.0,
+        }
+    }
+}
+
+fn default_input_gain() -> f32 { 1.0 }
 
 impl Effect {
     /// Convenience constructor for an LV2 effect with a fresh id, default name from URI.

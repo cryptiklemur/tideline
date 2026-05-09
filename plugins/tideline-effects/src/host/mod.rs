@@ -101,6 +101,12 @@ pub trait PluginFormat: Send + Sync {
         sample_rate: f64,
         max_block_size: u32,
     ) -> anyhow::Result<Box<dyn Plugin>>;
+    /// Rebuild whatever internal index this format uses to enumerate
+    /// plugins. Called by the rack rescan path so newly installed
+    /// plugins (after app start) become visible without restarting.
+    /// Default is a no-op for formats whose `scan()` re-walks disk
+    /// every call.
+    fn refresh(&self) {}
 }
 
 pub struct FormatRegistry {
@@ -130,6 +136,16 @@ impl FormatRegistry {
             out.extend(f.scan());
         }
         out
+    }
+
+
+    /// Tell every format to rebuild its plugin index. Cheap for formats
+    /// that already re-walk on `scan()`; heavier for LV2 where lilv's
+    /// `World` is built once at construction and otherwise stays stale.
+    pub fn refresh_all(&self) {
+        for f in &self.formats {
+            f.refresh();
+        }
     }
 
     pub fn instantiate(

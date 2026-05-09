@@ -131,6 +131,9 @@ fn recommended_uri_needles(channel_mono: bool) -> Vec<&'static str> {
     // since the in-process effect chain runs stereo internally regardless.
     if channel_mono {
         vec![
+            // Noise suppression — werman rnnoise. ML-based, voice-tuned,
+            // ~10ms latency; the de-facto choice on linux for mic cleanup.
+            "werman/noise-suppression-for-voice#mono",
             // LSP mono variants
             "para_equalizer_x16_mono",
             "Fil4Mono",
@@ -147,6 +150,8 @@ fn recommended_uri_needles(channel_mono: bool) -> Vec<&'static str> {
         ]
     } else {
         vec![
+            // Noise suppression — werman rnnoise stereo variant.
+            "werman/noise-suppression-for-voice#stereo",
             // LSP stereo variants
             "para_equalizer_x16_stereo",
             "Equalizer8Band",
@@ -354,6 +359,13 @@ pub async fn render_rack(
     let chain = state.chain_order(req.channel_uuid).await;
     let chain_bypassed = state.get_chain_bypass(req.channel_uuid).await;
 
+    let catalog_snapshot = state.catalog_clone().await;
+    let has_ui_for = |format: crate::host::Format, uri: &str| -> bool {
+        catalog_snapshot
+            .iter()
+            .any(|i| i.format == format && i.uri == uri && i.has_custom_ui)
+    };
+
     let mut effect_rows: Vec<Value> = Vec::new();
     for eid in &chain {
         let slot_opt = state
@@ -364,6 +376,59 @@ pub async fn render_rack(
             .cloned();
         let Some(slot) = slot_opt else { continue };
         let bypassed = slot.effect.bypassed;
+        let mut children: Vec<Value> = vec![
+            json!({
+                "kind": "icon",
+                "id": format!("grip:{eid}"),
+                "icon": { "name": "grip" },
+                "size": 14,
+            }),
+            json!({
+                "kind": "toggle",
+                "id": format!("bypass:{eid}"),
+                "value": !bypassed,
+            }),
+            json!({
+                "kind": "col",
+                "id": format!("name-col:{eid}"),
+                "gap": 0,
+                "children": [
+                    {
+                        "kind": "label",
+                        "id": format!("name:{eid}"),
+                        "text": slot.effect.display_name,
+                    },
+                    {
+                        "kind": "label",
+                        "id": format!("uri:{eid}"),
+                        "text": slot.effect.uri,
+                        "muted": true,
+                    }
+                ],
+            }),
+            json!({ "kind": "spacer", "id": format!("sp:{eid}") }),
+            json!({
+                "kind": "badge",
+                "id": format!("fmt:{eid}"),
+                "text": format_label(slot.effect.format),
+            }),
+        ];
+        if has_ui_for(slot.effect.format, &slot.effect.uri) {
+            children.push(json!({
+                "kind": "button",
+                "id": format!("open:{eid}"),
+                "text": "",
+                "icon": { "name": "settings" },
+                "variant": "ghost",
+            }));
+        }
+        children.push(json!({
+            "kind": "button",
+            "id": format!("remove:{eid}"),
+            "text": "",
+            "icon": { "name": "trash" },
+            "variant": "ghost",
+        }));
         let row = json!({
             "kind": "row",
             "id": format!("rack-row:{eid}"),
@@ -372,57 +437,9 @@ pub async fn render_rack(
             "variant": "card",
             "muted": bypassed || chain_bypassed,
             "pad": 3,
-            "children": [
-                {
-                    "kind": "icon",
-                    "id": format!("grip:{eid}"),
-                    "icon": { "name": "grip" },
-                    "size": 14,
-                },
-                {
-                    "kind": "toggle",
-                    "id": format!("bypass:{eid}"),
-                    "value": !bypassed,
-                },
-                {
-                    "kind": "col",
-                    "id": format!("name-col:{eid}"),
-                    "gap": 0,
-                    "children": [
-                        {
-                            "kind": "label",
-                            "id": format!("name:{eid}"),
-                            "text": slot.effect.display_name,
-                        },
-                        {
-                            "kind": "label",
-                            "id": format!("uri:{eid}"),
-                            "text": slot.effect.uri,
-                            "muted": true,
-                        }
-                    ],
-                },
-                { "kind": "spacer", "id": format!("sp:{eid}") },
-                {
-                    "kind": "badge",
-                    "id": format!("fmt:{eid}"),
-                    "text": format_label(slot.effect.format),
-                },
-                {
-                    "kind": "button",
-                    "id": format!("open:{eid}"),
-                    "text": "",
-                    "icon": { "name": "settings" },
-                    "variant": "ghost",
-                },
-                {
-                    "kind": "button",
-                    "id": format!("remove:{eid}"),
-                    "text": "",
-                    "icon": { "name": "trash" },
-                    "variant": "ghost",
-                }
-            ],
+            "draggable": true,
+            "drop_group": "fx-chain",
+            "children": children,
         });
         effect_rows.push(row);
     }
@@ -439,6 +456,7 @@ pub async fn render_rack(
                 "text": "",
                 "icon": { "name": "refresh" },
                 "variant": "ghost",
+                "tooltip": "Rescan plugin folders for newly installed LV2/VST plugins",
             }),
             json!({
                 "kind": "button",
@@ -455,6 +473,7 @@ pub async fn render_rack(
             "text": "Rescan",
             "icon": { "name": "refresh" },
             "variant": "soft",
+            "tooltip": "Rescan plugin folders for newly installed LV2/VST plugins",
         })]
     };
 
@@ -740,6 +759,63 @@ pub async fn handle_event(
                     data: None,
                 })?;
         }
+        "rack-row" => {
+            // Drop event: a row was dragged onto another row. Reorder
+            // by inserting the dragged effect immediately before the
+            // drop target's current position.
+            let drop_type = evt.value.get("type").and_then(|v| v.as_str()).unwrap_or("");
+            if drop_type != "drop" {
+                return Err(RpcError {
+                    code: error_codes::INVALID_PARAMS,
+                    message: format!("unsupported rack-row event type {drop_type}"),
+                    data: None,
+                });
+            }
+            let target_eid: Uuid = rest.parse().map_err(|_| RpcError {
+                code: error_codes::INVALID_PARAMS,
+                message: format!("bad target effect id {rest}"),
+                data: None,
+            })?;
+            let from_id = evt
+                .value
+                .get("from_id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| RpcError {
+                    code: error_codes::INVALID_PARAMS,
+                    message: "drop event missing from_id".into(),
+                    data: None,
+                })?;
+            let from_rest = from_id.strip_prefix("rack-row:").ok_or_else(|| RpcError {
+                code: error_codes::INVALID_PARAMS,
+                message: format!("from_id has unexpected shape {from_id}"),
+                data: None,
+            })?;
+            let source_eid: Uuid = from_rest.parse().map_err(|_| RpcError {
+                code: error_codes::INVALID_PARAMS,
+                message: format!("bad source effect id {from_rest}"),
+                data: None,
+            })?;
+            if source_eid == target_eid {
+                return Ok(json!({}));
+            }
+            let mut order = state.chain_order(evt.channel_uuid).await;
+            // Remove source from its current spot, then insert it at the
+            // target's spot. Net effect: dropping A onto B places A right
+            // before B (or right after if A used to be earlier in the list).
+            let Some(src_pos) = order.iter().position(|id| *id == source_eid) else {
+                return Ok(json!({}));
+            };
+            order.remove(src_pos);
+            let target_pos = order.iter().position(|id| *id == target_eid).unwrap_or(order.len());
+            order.insert(target_pos, source_eid);
+            chain_ops::reorder_chain(state.clone(), evt.channel_uuid, order)
+                .await
+                .map_err(|e| RpcError {
+                    code: error_codes::INTERNAL_ERROR,
+                    message: format!("reorder_chain: {e}"),
+                    data: None,
+                })?;
+        }
         "bypass" => {
             let effect_id: Uuid = rest.parse().map_err(|_| RpcError {
                 code: error_codes::INVALID_PARAMS,
@@ -784,7 +860,7 @@ pub async fn handle_event(
                 .show_ui_for_slot(evt.channel_uuid, effect_id, &title)
                 .map_err(|e| RpcError {
                     code: error_codes::INTERNAL_ERROR,
-                    message: format!("show_ui_for_slot: {e}"),
+                    message: format!("show_ui_for_slot: {e:#}"),
                     data: None,
                 })?;
             return Ok(json!({}));
@@ -792,13 +868,24 @@ pub async fn handle_event(
         "rescan" => {
             // Wipe the on-disk cache so we never silently merge stale entries.
             let _ = discovery::clear_cache();
+            // Tell every format to rebuild its plugin index. For LV2
+            // this rebuilds livi's `World` so plugins installed since
+            // app start become visible — without this step `scan_all`
+            // only re-iterates whatever lilv discovered at boot.
+            if let Some(engine) = state.engine() {
+                engine.formats().refresh_all();
+            }
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
             let fresh = discovery::scan_via_state(state);
             state.set_catalog(fresh.clone()).await;
             let cache = discovery::PluginScanCache {
-                scanned_at: 0,
-                source_mtime_max: 0,
-                source_entry_count: 0,
+                schema_version: discovery::CACHE_SCHEMA_VERSION,
+                scanned_at: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0),
+                source_mtime_max: discovery::max_source_mtime(),
+                source_entry_count: discovery::source_entry_count(),
                 plugins: fresh,
             };
             let _ = discovery::save_cache(&cache);
@@ -812,7 +899,7 @@ pub async fn handle_event(
         }
     }
 
-    let mutated = matches!(kind, "add" | "remove" | "bypass" | "chain_bypass");
+    let mutated = matches!(kind, "add" | "remove" | "bypass" | "chain_bypass" | "rack-row");
     if mutated {
         if let Err(e) = persist_channel(state, &host, evt.channel_uuid).await {
             tracing::warn!(

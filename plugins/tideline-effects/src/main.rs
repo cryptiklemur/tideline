@@ -168,7 +168,9 @@ impl Plugin for EffectsPlugin {
             }
         }
 
-        // Periodic auto-save: pull current LV2 state every 10s and persist it.
+        // Periodic auto-save: pull current LV2 state every 10s and persist
+        // it as a backstop against missed nudges (e.g. a crash that takes
+        // out the debouncer task before it flushes).
         let s = self.state.clone();
         tokio::spawn(async move {
             let mut tick = tokio::time::interval(std::time::Duration::from_secs(10));
@@ -180,6 +182,24 @@ impl Plugin for EffectsPlugin {
                 }
             }
         });
+
+        // Debounced save-on-change: every UI param tweak (engine.set_param)
+        // and every plugin-window close (tick_idle_uis removal) nudges
+        // engine.save_trigger. We collect notifications and write 250ms
+        // after the latest one so a slider drag emits one save instead of
+        // hundreds. Felt-immediate to the user (~quarter second), zero
+        // disk thrash.
+        if let Some(engine) = self.state.engine() {
+            let trigger = engine.save_trigger();
+            let s2 = self.state.clone();
+            tokio::spawn(async move {
+                loop {
+                    trigger.notified().await;
+                    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                    persist::refresh_state_and_save(s2.clone()).await;
+                }
+            });
+        }
 
         info!(plugin = PLUGIN_ID, "ready");
     }
@@ -210,11 +230,94 @@ impl Plugin for EffectsPlugin {
             "pipewire.contribute_request" => {
                 pipewire_contributor::respond(&self.state, params).await
             }
+            "effects.set_lowcut" => {
+                let req = params.ok_or_else(|| RpcError {
+                    code: error_codes::INVALID_PARAMS,
+                    message: "missing params".into(),
+                    data: None,
+                })?;
+                let channel_uuid = req.get("channel_uuid")
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| uuid::Uuid::parse_str(s).ok())
+                    .ok_or_else(|| RpcError {
+                        code: error_codes::INVALID_PARAMS,
+                        message: "channel_uuid required".into(),
+                        data: None,
+                    })?;
+                let enabled = req.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
+                self.state.set_lowcut(channel_uuid, enabled).await;
+                Ok(serde_json::json!({ "ok": true, "enabled": enabled }))
+            }
+            "effects.set_clipguard" => {
+                let req = params.ok_or_else(|| RpcError {
+                    code: error_codes::INVALID_PARAMS,
+                    message: "missing params".into(),
+                    data: None,
+                })?;
+                let channel_uuid = req.get("channel_uuid")
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| uuid::Uuid::parse_str(s).ok())
+                    .ok_or_else(|| RpcError {
+                        code: error_codes::INVALID_PARAMS,
+                        message: "channel_uuid required".into(),
+                        data: None,
+                    })?;
+                let enabled = req.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
+                self.state.set_clipguard(channel_uuid, enabled).await;
+                Ok(serde_json::json!({ "ok": true, "enabled": enabled }))
+            }
+            "effects.set_input_gain" => {
+                let req = params.ok_or_else(|| RpcError {
+                    code: error_codes::INVALID_PARAMS,
+                    message: "missing params".into(),
+                    data: None,
+                })?;
+                let channel_uuid = req.get("channel_uuid")
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| uuid::Uuid::parse_str(s).ok())
+                    .ok_or_else(|| RpcError {
+                        code: error_codes::INVALID_PARAMS,
+                        message: "channel_uuid required".into(),
+                        data: None,
+                    })?;
+                let amp = req.get("amp").and_then(|v| v.as_f64()).unwrap_or(1.0) as f32;
+                self.state.set_input_gain(channel_uuid, amp).await;
+                Ok(serde_json::json!({ "ok": true, "amp": amp }))
+            }
+            "effects.get_dsp_state" => {
+                let req = params.ok_or_else(|| RpcError {
+                    code: error_codes::INVALID_PARAMS,
+                    message: "missing params".into(),
+                    data: None,
+                })?;
+                let channel_uuid = req.get("channel_uuid")
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| uuid::Uuid::parse_str(s).ok())
+                    .ok_or_else(|| RpcError {
+                        code: error_codes::INVALID_PARAMS,
+                        message: "channel_uuid required".into(),
+                        data: None,
+                    })?;
+                let lowcut = self.state.get_lowcut(channel_uuid).await;
+                let clipguard = self.state.get_clipguard(channel_uuid).await;
+                let input_gain = self.state.get_input_gain(channel_uuid).await;
+                Ok(serde_json::json!({
+                    "lowcut": lowcut,
+                    "clipguard": clipguard,
+                    "input_gain": input_gain,
+                }))
+            }
             "effects.audition_record_start" => {
                 audition::handle_record_start(&self.state, host, params).await
             }
             "effects.audition_record_stop" => {
                 audition::handle_record_stop(&self.state, host, params).await
+            }
+            "effects.audition_load_file" => {
+                audition::handle_load_file(&self.state, host, params).await
+            }
+            "effects.audition_save_recording" => {
+                audition::handle_save_recording(&self.state, host, params).await
             }
             "effects.audition_loop_start" => {
                 audition::handle_loop_start(&self.state, host, params).await
@@ -256,13 +359,7 @@ impl Plugin for EffectsPlugin {
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)]
 async fn main() {
-    tracing_subscriber::fmt()
-        .with_writer(std::io::stderr)
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info,tideline_effects=debug")),
-        )
-        .init();
+    let _log_guard = tideline_sdk::logging::init("tideline-effects");
 
     let state = state::EffectsState::new(PLUGIN_ID);
     let plugin = EffectsPlugin { state };

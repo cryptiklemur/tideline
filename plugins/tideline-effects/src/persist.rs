@@ -11,13 +11,33 @@ use uuid::Uuid;
 use crate::effect::Effect;
 use crate::state::EffectsState;
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PersistedChannel {
     #[serde(default)]
     pub bypassed: bool,
     #[serde(default)]
+    pub lowcut: bool,
+    #[serde(default)]
+    pub clipguard: bool,
+    #[serde(default = "default_input_gain")]
+    pub input_gain: f32,
+    #[serde(default)]
     pub effects: Vec<Effect>,
 }
+
+impl Default for PersistedChannel {
+    fn default() -> Self {
+        Self {
+            bypassed: false,
+            lowcut: false,
+            clipguard: false,
+            input_gain: 1.0,
+            effects: Vec::new(),
+        }
+    }
+}
+
+fn default_input_gain() -> f32 { 1.0 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct PersistedChains {

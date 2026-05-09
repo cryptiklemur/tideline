@@ -163,12 +163,14 @@ pub fn build_base_topology(
                 // active (real mic → in-process FX engine → virtual source).
                 let feed_cap = format!("capture.{s}-fx-feed");
                 let feed_pb = format!("playback.{s}-fx-feed");
+                // dont-remix is omitted on captures from physical mics so
+                // pipewire upmixes mono sources (most usb mics) to FL,FR
+                // automatically. With it on, mono shows up only on FL.
                 out.push(loopback_directive(
                     vec![
                         ("node.name".into(), quoted(feed_cap)),
                         ("target.object".into(), quoted(&ch.physical_source)),
                         ("audio.position".into(), fl_fr()),
-                        ("stream.dont-remix".into(), literal("true")),
                     ],
                     vec![
                         ("node.name".into(), quoted(feed_pb)),
@@ -186,7 +188,6 @@ pub fn build_base_topology(
                             ("node.name".into(), quoted(cap)),
                             ("target.object".into(), quoted(&ch.physical_source)),
                             ("audio.position".into(), fl_fr()),
-                            ("stream.dont-remix".into(), literal("true")),
                         ];
                         let playback_props = vec![
                             ("node.name".into(), quoted(pb)),

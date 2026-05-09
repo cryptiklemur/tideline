@@ -12,7 +12,7 @@ use tideline_core::pipewire::{fx_source_node, mix_capture_node, mix_playback_nod
 use tideline_sdk::contribute::{MixMuteEntry, PipewireContributeRequest};
 use tideline_sdk::rpc::{error_codes, RpcError};
 
-use crate::effect::{ChannelEffectsData, Effect};
+use crate::effect::ChannelEffectsData;
 use crate::state::EffectsState;
 use crate::util::channel_jack_client;
 
@@ -110,6 +110,9 @@ fn persisted_chains_from_appconfig(cfg: &AppConfig) -> crate::persist::Persisted
             ch.uuid,
             crate::persist::PersistedChannel {
                 bypassed: data.chain_bypassed,
+                lowcut: data.lowcut,
+                clipguard: data.clipguard,
+                input_gain: data.input_gain,
                 effects: data.effects,
             },
         );
@@ -141,7 +144,11 @@ pub fn build_all_directives(
 }
 
 fn chain_should_apply(data: &ChannelEffectsData) -> bool {
-    !data.effects.is_empty() && !data.chain_bypassed
+    // Render fx routing whenever the channel has any effects configured —
+    // bypassed or not. The JACK process callback handles per-slot and
+    // chain-level bypass at runtime so toggles never reshape pipewire,
+    // avoiding restart-driven audio glitches.
+    !data.effects.is_empty()
 }
 
 fn read_effects_data(ch: &ChannelCfg) -> ChannelEffectsData {
@@ -178,8 +185,13 @@ pub fn build_directives_for_channel(
         return Vec::new();
     }
 
-    let chain: Vec<&Effect> = data.effects.iter().filter(|e| !e.bypassed).collect();
-    if chain.is_empty() {
+    // We deliberately do NOT filter `data.effects` by `bypassed` here —
+    // pipewire routing should be identical regardless of which slots are
+    // bypassed. The JACK ProcessHandler short-circuits bypassed slots at
+    // runtime. This keeps the rendered conf byte-stable across bypass
+    // toggles, so write_pipewire_and_restart hits the unchanged-conf
+    // skip-restart path.
+    if data.effects.is_empty() {
         return vec![PipewireDirective::DestroyModule { target_tag: tag }];
     }
 
@@ -231,12 +243,14 @@ pub fn build_directives_for_channel(
             }
         }
         ChannelKind::PhysicalInput => {
+            // dont-remix is omitted: most physical mics are mono and we
+            // want pipewire to upmix them to FL,FR for the stereo fx
+            // chain. Stereo mics 1:1 map and aren't affected.
             out.push(loopback(
                 vec![
                     ("node.name".into(), quoted(format!("capture.{s}-fx-pre"))),
                     ("target.object".into(), quoted(&ch.physical_source)),
                     ("audio.position".into(), fl_fr()),
-                    ("stream.dont-remix".into(), literal("true")),
                 ],
                 vec![
                     ("node.name".into(), quoted(format!("playback.{s}-fx-pre"))),
@@ -354,7 +368,7 @@ fn fl_fr() -> ArgValue {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::effect::PluginFormat;
+    use crate::effect::{Effect, PluginFormat};
     use uuid::Uuid;
 
     fn output_channel() -> ChannelCfg {
@@ -385,6 +399,9 @@ mod tests {
         ChannelEffectsData {
             effects: vec![make_effect(Uuid::nil(), "http://lsp-plug.in/plugins/lv2/gate_mono")],
             chain_bypassed: false,
+            lowcut: false,
+            clipguard: false,
+            input_gain: 1.0,
         }
     }
 
@@ -396,6 +413,9 @@ mod tests {
                 make_effect(Uuid::from_u128(3), "http://lsp-plug.in/plugins/lv2/sc_compressor_stereo"),
             ],
             chain_bypassed: false,
+            lowcut: false,
+            clipguard: false,
+            input_gain: 1.0,
         }
     }
 
@@ -411,17 +431,68 @@ mod tests {
     }
 
     #[test]
-    fn chain_bypassed_yields_no_directives() {
+    fn chain_bypassed_still_emits_directives() {
+        // chain_bypassed is enforced at runtime in the JACK ProcessHandler,
+        // not at the pipewire conf level. Toggling it must produce identical
+        // directives to the non-bypassed case so write_pipewire_and_restart
+        // hits the unchanged-conf skip-restart path.
         let ch = output_channel();
-        let mut cfg = AppConfig::default();
+        let mut cfg_active = AppConfig::default();
+        let mut ch_active = ch.clone();
+        ch_active.plugin_data.insert(
+            "tideline-effects".into(),
+            serde_json::to_value(one_effect_data()).unwrap(),
+        );
+        cfg_active.channels.push(ch_active);
+        cfg_active.mixes.push(one_mix("default"));
+
+        let mut cfg_bypassed = AppConfig::default();
         let mut data = one_effect_data();
         data.chain_bypassed = true;
-        let mut ch2 = ch;
-        ch2.plugin_data
+        let mut ch_bypassed = ch;
+        ch_bypassed
+            .plugin_data
             .insert("tideline-effects".into(), serde_json::to_value(data).unwrap());
-        cfg.channels.push(ch2);
-        cfg.mixes.push(one_mix("default"));
-        assert!(build_all_directives(&cfg, &[]).is_empty());
+        cfg_bypassed.channels.push(ch_bypassed);
+        cfg_bypassed.mixes.push(one_mix("default"));
+
+        let active_dirs = build_all_directives(&cfg_active, &[]);
+        let bypassed_dirs = build_all_directives(&cfg_bypassed, &[]);
+        assert!(!bypassed_dirs.is_empty());
+        assert_eq!(active_dirs.len(), bypassed_dirs.len());
+    }
+
+    #[test]
+    fn all_effects_bypassed_still_emits_directives() {
+        // Same principle as chain_bypassed: per-effect bypass is runtime,
+        // not pipewire-level. All-bypassed must produce the same directives
+        // as all-active.
+        let ch = output_channel();
+        let mut cfg_active = AppConfig::default();
+        let mut ch_active = ch.clone();
+        ch_active.plugin_data.insert(
+            "tideline-effects".into(),
+            serde_json::to_value(three_effect_data()).unwrap(),
+        );
+        cfg_active.channels.push(ch_active);
+        cfg_active.mixes.push(one_mix("default"));
+
+        let mut cfg_bypassed = AppConfig::default();
+        let mut data = three_effect_data();
+        for e in &mut data.effects {
+            e.bypassed = true;
+        }
+        let mut ch_bypassed = ch;
+        ch_bypassed
+            .plugin_data
+            .insert("tideline-effects".into(), serde_json::to_value(data).unwrap());
+        cfg_bypassed.channels.push(ch_bypassed);
+        cfg_bypassed.mixes.push(one_mix("default"));
+
+        let active_dirs = build_all_directives(&cfg_active, &[]);
+        let bypassed_dirs = build_all_directives(&cfg_bypassed, &[]);
+        assert!(!bypassed_dirs.is_empty());
+        assert_eq!(active_dirs.len(), bypassed_dirs.len());
     }
 
     #[test]
@@ -532,7 +603,10 @@ mod tests {
     }
 
     #[test]
-    fn all_effects_bypassed_emits_only_destroy() {
+    fn all_effects_bypassed_emits_full_routing() {
+        // Per-effect bypass is runtime-only — it must not change the
+        // pipewire conf. With one effect bypassed, directives match the
+        // active case (destroy + pre + 1 post = 3 for a 1-mix output).
         let ch = output_channel();
         let mut data = one_effect_data();
         data.effects[0].bypassed = true;
@@ -544,7 +618,6 @@ mod tests {
         cfg.mixes.push(one_mix("default_sink"));
 
         let dirs = build_all_directives(&cfg, &[]);
-        assert_eq!(dirs.len(), 1);
-        assert!(matches!(dirs[0], PipewireDirective::DestroyModule { .. }));
+        assert_eq!(dirs.len(), 3);
     }
 }

@@ -409,10 +409,7 @@ async fn install_udev_rule() -> Result<(), String> {
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)]
 async fn main() {
-    tracing_subscriber::fmt()
-        .with_writer(std::io::stderr)
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .init();
+    let _log_guard = tideline_sdk::logging::init("tideline-ptt");
 
     let runtime = PttRuntime::new_without_client(PLUGIN_ID, PluginConfig::default());
     let plugin = PttPlugin { runtime };

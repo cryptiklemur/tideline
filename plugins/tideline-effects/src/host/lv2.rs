@@ -42,8 +42,14 @@ pub(crate) struct UiToPluginAtom {
 }
 
 pub struct Lv2Format {
-    world: Arc<World>,
-    features: Arc<livi::Features>,
+    /// `livi::World` scans LV2_PATH at construction time and never
+    /// re-walks disk. Wrapping it in a lock lets `refresh()` swap in a
+    /// freshly-built world so plugins installed after app start become
+    /// visible after a rescan. Existing plugin instances keep their own
+    /// `Arc<World>` so they remain valid across a swap.
+    world: parking_lot::RwLock<Arc<World>>,
+    features: parking_lot::RwLock<Arc<livi::Features>>,
+    max_block_length: usize,
 }
 
 impl Lv2Format {
@@ -53,7 +59,25 @@ impl Lv2Format {
             min_block_length: 1,
             max_block_length,
         });
-        Self { world, features }
+        Self {
+            world: parking_lot::RwLock::new(world),
+            features: parking_lot::RwLock::new(features),
+            max_block_length,
+        }
+    }
+
+    /// Rebuild `World` so newly-installed LV2 plugins become visible.
+    /// `livi::World::new()` re-walks LV2_PATH; old `Arc<World>` clones
+    /// held by existing plugin instances stay valid (they're just no
+    /// longer the canonical one for new lookups).
+    pub fn refresh_world(&self) {
+        let world = Arc::new(World::new());
+        let features = world.build_features(FeaturesBuilder {
+            min_block_length: 1,
+            max_block_length: self.max_block_length,
+        });
+        *self.world.write() = world;
+        *self.features.write() = features;
     }
 }
 
@@ -69,7 +93,11 @@ impl PluginFormat for Lv2Format {
     }
 
     fn scan(&self) -> Vec<PluginInfo> {
-        self.world
+        let world = self.world.read().clone();
+        let x11_ui_node = world
+            .raw()
+            .new_uri(crate::host::lv2_ui::LV2_UI_X11_UI);
+        world
             .iter_plugins()
             .filter_map(|p| {
                 let counts = p.port_counts();
@@ -77,6 +105,11 @@ impl PluginFormat for Lv2Format {
                     return None;
                 }
                 let category = p.classes().next().unwrap_or("").to_string();
+                let has_custom_ui = p
+                    .raw()
+                    .uis()
+                    .map(|uis| uis.iter().any(|ui| ui.is_a(&x11_ui_node)))
+                    .unwrap_or(false);
                 Some(PluginInfo {
                     format: Format::Lv2,
                     uri: p.uri(),
@@ -85,7 +118,7 @@ impl PluginFormat for Lv2Format {
                     category,
                     audio_inputs: counts.audio_inputs as u32,
                     audio_outputs: counts.audio_outputs as u32,
-                    has_custom_ui: false,
+                    has_custom_ui,
                 })
             })
             .collect()
@@ -97,15 +130,20 @@ impl PluginFormat for Lv2Format {
         sample_rate: f64,
         _max_block_size: u32,
     ) -> anyhow::Result<Box<dyn Plugin>> {
-        let plugin = self
-            .world
+        // Snapshot the current world+features Arcs once. Holding clones
+        // here means a concurrent refresh_world() doesn't yank our world
+        // out from under us mid-instantiation.
+        let world = self.world.read().clone();
+        let features = self.features.read().clone();
+
+        let plugin = world
             .plugin_by_uri(&info.uri)
             .ok_or_else(|| anyhow::anyhow!("LV2 plugin {} not found", info.uri))?;
 
         // SAFETY: livi marks instantiate as unsafe because LV2 plugin code is
         // arbitrary native code. We trust LV2 plugins installed on the host
         // system at the same level we trust any other native dynamic library.
-        let instance = unsafe { plugin.instantiate(self.features.clone(), sample_rate)? };
+        let instance = unsafe { plugin.instantiate(features.clone(), sample_rate)? };
 
         let mut params = Vec::new();
         let mut symbol_to_index = HashMap::new();
@@ -128,11 +166,11 @@ impl PluginFormat for Lv2Format {
         let counts = *plugin.port_counts();
         let mut atom_in = Vec::with_capacity(counts.atom_sequence_inputs);
         for _ in 0..counts.atom_sequence_inputs {
-            atom_in.push(LV2AtomSequence::new(&self.features, ATOM_BUFFER_BYTES));
+            atom_in.push(LV2AtomSequence::new(&features, ATOM_BUFFER_BYTES));
         }
         let mut atom_out = Vec::with_capacity(counts.atom_sequence_outputs);
         for _ in 0..counts.atom_sequence_outputs {
-            atom_out.push(LV2AtomSequence::new(&self.features, ATOM_BUFFER_BYTES));
+            atom_out.push(LV2AtomSequence::new(&features, ATOM_BUFFER_BYTES));
         }
 
         // Parallel to atom_out: the LV2 port indices for each AtomSequenceOutput
@@ -156,8 +194,7 @@ impl PluginFormat for Lv2Format {
             }
         }
 
-        let event_transfer_urid = self
-            .features
+        let event_transfer_urid = features
             .urid(CStr::from_bytes_with_nul(b"http://lv2plug.in/ns/ext/atom#eventTransfer\0").unwrap());
 
         Ok(Box::new(Lv2Plugin {
@@ -174,16 +211,20 @@ impl PluginFormat for Lv2Format {
             ui_event_tx: None,
             ui_atom_rx: None,
             plugin_handle: plugin,
-            world: self.world.clone(),
-            features: self.features.clone(),
+            world,
+            features,
         }))
+    }
+
+    fn refresh(&self) {
+        self.refresh_world();
     }
 }
 
 pub(crate) struct Lv2Plugin {
     pub(crate) info: PluginInfo,
-    instance: livi::Instance,
-    params: Vec<ParamInfo>,
+    pub(super) instance: livi::Instance,
+    pub(super) params: Vec<ParamInfo>,
     symbol_to_index: HashMap<String, u32>,
     atom_in: Vec<LV2AtomSequence>,
     atom_out: Vec<LV2AtomSequence>,
@@ -222,8 +263,10 @@ impl Plugin for Lv2Plugin {
     }
 
     fn set_param(&mut self, index: u32, value: f32) {
-        self.instance
+        let clamped = self
+            .instance
             .set_control_input(livi::PortIndex(index as usize), value);
+        tracing::debug!(uri = %self.info.uri, index, value, clamped = ?clamped, "set_param");
     }
 
     fn save_state(&self) -> anyhow::Result<Vec<u8>> {
@@ -236,6 +279,7 @@ impl Plugin for Lv2Plugin {
                 map.insert(param.symbol.clone(), v);
             }
         }
+        tracing::debug!(uri = %self.info.uri, port_count = map.len(), values = ?map, "save_state");
         Ok(serde_json::to_vec(&map)?)
     }
 
@@ -283,12 +327,24 @@ impl Plugin for Lv2Plugin {
                 // requests; subscription messages are typically <200 bytes.
                 match livi::event::LV2AtomEventBuilder::<4096>::new(0, type_urid, body) {
                     Ok(event) => {
-                        if let Err(e) = self.atom_in[in_idx].push_event(&event) {
-                            tracing::trace!(error = ?e, "atom_in push failed");
+                        match self.atom_in[in_idx].push_event(&event) {
+                            Ok(_) => tracing::trace!(
+                                port_index = atom.port_index,
+                                size,
+                                type_urid,
+                                "atom_in push ok"
+                            ),
+                            Err(e) => tracing::warn!(
+                                error = ?e,
+                                port_index = atom.port_index,
+                                size,
+                                type_urid,
+                                "atom_in push failed"
+                            ),
                         }
                     }
                     Err(e) => {
-                        tracing::trace!(error = ?e, "ui→plugin atom too large");
+                        tracing::warn!(error = ?e, size, "ui→plugin atom too large");
                     }
                 }
             }

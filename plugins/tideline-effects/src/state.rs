@@ -28,24 +28,23 @@ pub struct EffectsState {
     #[allow(dead_code)]
     pub plugin_id: &'static str,
     pub host: OnceCell<Arc<HostClient>>,
-    pub engine_cell: OnceCell<Arc<AudioEngine>>,
+    pub engine_cell: OnceCell<Arc<crate::engine::AudioEngine>>,
     pub chains: Mutex<HashMap<Uuid, Vec<Uuid>>>,
     pub effects: Mutex<BTreeMap<(Uuid, Uuid), ChainSlot>>,
     pub chain_bypass: Mutex<HashMap<Uuid, bool>>,
+    /// Per-channel lowcut HPF toggle. Persisted in chains.json. Lives
+    /// alongside chain_bypass since it is also a chain-level switch.
+    pub lowcut: Mutex<HashMap<Uuid, bool>>,
+    /// Per-channel clipguard soft-clip toggle. Persisted in chains.json.
+    pub clipguard: Mutex<HashMap<Uuid, bool>>,
+    /// Per-channel software input gain stored as linear amp (1.0 = unity).
+    /// Persisted in chains.json. Replaces the alsa amixer slider on
+    /// physical inputs since some hardware preamps (e.g. Wave XLR) have
+    /// firmware DSP that ignores host-driven volume changes.
+    pub input_gain: Mutex<HashMap<Uuid, f32>>,
     pub catalog: Mutex<Vec<PluginInfo>>,
-    /// When true, mutations skip writing chains.json. Used during
-    /// `apply_persisted_chains` so a partial reload can't overwrite a
-    /// known-good on-disk snapshot with an empty one.
     pub suppress_save: std::sync::atomic::AtomicBool,
-    /// Set after the first `pipewire.contribute_request` reconciles engine
-    /// state from `AppConfig.plugin_data`. Guards against repeated full
-    /// rebuilds on every subsequent contribute call.
     pub appconfig_synced: std::sync::atomic::AtomicBool,
-    /// Set once `set_catalog` has been called with the LV2 plugin catalog.
-    /// Contribute requests can race ahead of `on_ready`'s discovery scan;
-    /// the contributor must `wait_for_catalog().await` before any
-    /// `apply_persisted_chains` call so `add_effect` finds the plugin URI
-    /// in the catalog instead of failing with "plugin not in catalog".
     pub catalog_ready: std::sync::atomic::AtomicBool,
     pub catalog_ready_notify: tokio::sync::Notify,
     /// Per-session FX-audition session (one channel at a time). Holds
@@ -64,6 +63,9 @@ impl EffectsState {
             chains: Mutex::new(HashMap::new()),
             effects: Mutex::new(BTreeMap::new()),
             chain_bypass: Mutex::new(HashMap::new()),
+            lowcut: Mutex::new(HashMap::new()),
+            clipguard: Mutex::new(HashMap::new()),
+            input_gain: Mutex::new(HashMap::new()),
             catalog: Mutex::new(Vec::new()),
             suppress_save: std::sync::atomic::AtomicBool::new(false),
             appconfig_synced: std::sync::atomic::AtomicBool::new(false),
@@ -232,10 +234,51 @@ impl EffectsState {
         crate::persist::save_chains_to_disk(self).await;
     }
 
+
+    pub async fn get_lowcut(&self, channel_id: Uuid) -> bool {
+        self.lowcut.lock().await.get(&channel_id).copied().unwrap_or(false)
+    }
+
+    pub async fn set_lowcut(&self, channel_id: Uuid, enabled: bool) {
+        self.lowcut.lock().await.insert(channel_id, enabled);
+        if let Some(engine) = self.engine() {
+            let _ = engine.set_lowcut(channel_id, enabled);
+        }
+        crate::persist::save_chains_to_disk(self).await;
+    }
+
+    pub async fn get_clipguard(&self, channel_id: Uuid) -> bool {
+        self.clipguard.lock().await.get(&channel_id).copied().unwrap_or(false)
+    }
+
+    pub async fn set_clipguard(&self, channel_id: Uuid, enabled: bool) {
+        self.clipguard.lock().await.insert(channel_id, enabled);
+        if let Some(engine) = self.engine() {
+            let _ = engine.set_clipguard(channel_id, enabled);
+        }
+        crate::persist::save_chains_to_disk(self).await;
+    }
+
+    pub async fn get_input_gain(&self, channel_id: Uuid) -> f32 {
+        self.input_gain.lock().await.get(&channel_id).copied().unwrap_or(1.0)
+    }
+
+    pub async fn set_input_gain(&self, channel_id: Uuid, amp: f32) {
+        let clamped = amp.clamp(0.0, 8.0);
+        self.input_gain.lock().await.insert(channel_id, clamped);
+        if let Some(engine) = self.engine() {
+            let _ = engine.set_input_gain(channel_id, clamped);
+        }
+        crate::persist::save_chains_to_disk(self).await;
+    }
+
     pub async fn snapshot_persisted(&self) -> crate::persist::PersistedChains {
         let chains = self.chains.lock().await.clone();
         let effects = self.effects.lock().await.clone();
         let chain_bypass = self.chain_bypass.lock().await.clone();
+        let lowcut = self.lowcut.lock().await.clone();
+        let clipguard = self.clipguard.lock().await.clone();
+        let input_gain = self.input_gain.lock().await.clone();
         let mut channels: BTreeMap<Uuid, crate::persist::PersistedChannel> = BTreeMap::new();
         for (channel_id, order) in chains {
             let mut effect_list: Vec<Effect> = Vec::with_capacity(order.len());
@@ -248,6 +291,9 @@ impl EffectsState {
                 channel_id,
                 crate::persist::PersistedChannel {
                     bypassed: chain_bypass.get(&channel_id).copied().unwrap_or(false),
+                    lowcut: lowcut.get(&channel_id).copied().unwrap_or(false),
+                    clipguard: clipguard.get(&channel_id).copied().unwrap_or(false),
+                    input_gain: input_gain.get(&channel_id).copied().unwrap_or(1.0),
                     effects: effect_list,
                 },
             );
@@ -255,6 +301,30 @@ impl EffectsState {
         for (channel_id, bypassed) in chain_bypass {
             channels.entry(channel_id).or_insert(crate::persist::PersistedChannel {
                 bypassed,
+                lowcut: lowcut.get(&channel_id).copied().unwrap_or(false),
+                clipguard: clipguard.get(&channel_id).copied().unwrap_or(false),
+                input_gain: input_gain.get(&channel_id).copied().unwrap_or(1.0),
+                effects: Vec::new(),
+            });
+        }
+        // Channels that have only lowcut/clipguard/input_gain set without
+        // any chain bypass entry still need persistence — otherwise the
+        // toggle/value is lost on restart.
+        for (channel_id, _) in lowcut.iter().chain(clipguard.iter()) {
+            channels.entry(*channel_id).or_insert_with(|| crate::persist::PersistedChannel {
+                bypassed: false,
+                lowcut: lowcut.get(channel_id).copied().unwrap_or(false),
+                clipguard: clipguard.get(channel_id).copied().unwrap_or(false),
+                input_gain: input_gain.get(channel_id).copied().unwrap_or(1.0),
+                effects: Vec::new(),
+            });
+        }
+        for channel_id in input_gain.keys() {
+            channels.entry(*channel_id).or_insert_with(|| crate::persist::PersistedChannel {
+                bypassed: false,
+                lowcut: lowcut.get(channel_id).copied().unwrap_or(false),
+                clipguard: clipguard.get(channel_id).copied().unwrap_or(false),
+                input_gain: input_gain.get(channel_id).copied().unwrap_or(1.0),
                 effects: Vec::new(),
             });
         }
@@ -264,6 +334,9 @@ impl EffectsState {
     pub async fn clear_chain_state(&self) {
         self.chains.lock().await.clear();
         self.effects.lock().await.clear();
+        self.lowcut.lock().await.clear();
+        self.clipguard.lock().await.clear();
+        self.input_gain.lock().await.clear();
     }
 }
 
@@ -307,6 +380,18 @@ pub async fn apply_persisted_chains(
     let mut any_failed = false;
     for (channel_id, ch) in persisted.channels {
         state.set_chain_bypass(channel_id, ch.bypassed).await;
+        if ch.lowcut {
+            state.set_lowcut(channel_id, true).await;
+        }
+        if ch.clipguard {
+            state.set_clipguard(channel_id, true).await;
+        }
+        // Apply persisted gain even if it's unity (1.0) — if the engine
+        // is being rebuilt the channel's atomic was already reset to 1.0
+        // at construction, so storing it again is a cheap no-op anyway.
+        if (ch.input_gain - 1.0).abs() > f32::EPSILON {
+            state.set_input_gain(channel_id, ch.input_gain).await;
+        }
         // Dedupe by effect id before applying. attach_effect will skip
         // duplicates in chain_order, but engine.add_plugin would still
         // be called twice and could enter a bad state. Persisted files
@@ -375,6 +460,12 @@ pub async fn recreate_engine_from_state(state: Arc<EffectsState>) {
         }
         if ch.bypassed {
             let _ = engine.set_chain_bypass(*channel_id, true);
+        }
+        if ch.lowcut {
+            let _ = engine.set_lowcut(*channel_id, true);
+        }
+        if ch.clipguard {
+            let _ = engine.set_clipguard(*channel_id, true);
         }
         for effect in &ch.effects {
             let info = match crate::chain_ops::plugin_info_for(&state, effect) {

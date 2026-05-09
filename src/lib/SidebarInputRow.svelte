@@ -19,6 +19,8 @@ interface Props {
 
 let { inp, isActive, meterSource, sinkName, onSelect, extra }: Props = $props();
 
+const EFFECTS_PLUGIN_ID = 'tideline-effects';
+
 const METER_FLOOR_DB = -60;
 const PEAK_HOLD_MS = 1200;
 const PEAK_FALL_PER_SEC = 0.4;
@@ -37,6 +39,7 @@ let peakHold = $state(0);
 let lastPeakAt = 0;
 
 let vol = $state(100);
+let softGainAmp = $state(1.0);
 let muted = $state(false);
 let cardId = $state<number | null>(null);
 let cardControls = $state<CardControl[]>([]);
@@ -46,7 +49,8 @@ let primaryCapture = $derived(
         ? cardControls.find(c => c.is_capture && c.has_volume) ?? null
         : null
 );
-let gainDb = $derived(primaryCapture?.current_db ?? null);
+let softGainDb = $derived(softGainAmp > 0 ? 20 * Math.log10(softGainAmp) : null);
+let gainDb = $derived(inp.kind === 'physical_input' ? softGainDb : (primaryCapture?.current_db ?? null));
 
 function formatDb(db: number): string {
     const sign = db > 0 ? '+' : '';
@@ -99,16 +103,28 @@ function scheduleHide() {
 async function refreshState() {
     try {
         if (inp.kind === 'physical_input' && inp.physical_source) {
+            // For physical inputs, vol is owned by the software gain stage on
+            // the effects plugin (alsa preamp / pulse source vol are unreliable
+            // on hardware with firmware DSP like Wave XLR).
             const s = await invoke<[number, boolean] | null>('get_source_state', { name: inp.physical_source });
-            if (s) { vol = s[0]; muted = s[1]; }
+            if (s) { muted = s[1]; }
             if (cardId === null) {
                 cardId = await invoke<number | null>('get_card_for_source', { source: inp.physical_source });
             }
             if (cardId !== null) {
                 cardControls = await invoke<CardControl[]>('list_card_controls', { card: cardId });
-                const primary = cardControls.find(c => c.is_capture && c.has_volume);
-                if (primary) vol = primary.volume_percent;
             }
+            try {
+                const dsp = await invoke<{ input_gain: number }>('tideline_plugin_request', {
+                    pluginId: EFFECTS_PLUGIN_ID,
+                    method: 'effects.get_dsp_state',
+                    params: { channel_uuid: inp.uuid },
+                });
+                if (typeof dsp.input_gain === 'number') {
+                    softGainAmp = dsp.input_gain;
+                    vol = Math.round(softGainAmp * 100);
+                }
+            } catch { /* effects plugin may not be ready yet */ }
         } else if (sinkName) {
             const s = await invoke<[number, boolean] | null>('get_sink_state', { name: sinkName });
             if (s) { vol = s[0]; muted = s[1]; }
@@ -202,10 +218,11 @@ onMount(() => {
         if (!payload || typeof payload !== 'object') return;
         if ((payload as Record<string, unknown>)[muteKey] !== targetName) return;
         const v = (payload as { volume_pct?: unknown }).volume_pct;
-        if (typeof v === 'number') {
-            // card-control reads override source volume when present, so only
-            // overwrite vol if there is no primary capture control.
-            if (!primaryCapture) vol = v;
+        // Only mirror pulse vol -> slider for non-physical inputs (sinks).
+        // Physical inputs use the software gain stage and aren't tied to
+        // pulse source volume.
+        if (typeof v === 'number' && inp.kind !== 'physical_input') {
+            vol = v;
         }
     }).then(fn => { volUnlisten = fn; });
 
@@ -216,9 +233,7 @@ onMount(() => {
             cardControls = cardControls.map((c, i) =>
                 i === idx ? { ...c, volume_percent: e.payload.volume_pct } : c
             );
-            if (primaryCapture && primaryCapture.name === e.payload.name) {
-                vol = e.payload.volume_pct;
-            }
+            // Slider is software gain, not amixer — don't mirror.
         }
     }).then(fn => { cardCtrlUnlisten = fn; });
 });
@@ -247,23 +262,23 @@ async function toggleMute() {
 
 async function onVolChange(v: number) {
     const prevVol = vol;
-    const prevControls = cardControls;
+    const prevAmp = softGainAmp;
     vol = v;
     try {
         if (inp.kind === 'physical_input') {
-            if (primaryCapture && cardId !== null) {
-                const name = primaryCapture.name;
-                cardControls = cardControls.map(c => c.name === name ? { ...c, volume_percent: v } : c);
-                await invoke('set_card_control_volume', { card: cardId, name, pct: v });
-            } else if (inp.physical_source) {
-                await invoke('set_source_volume', { name: inp.physical_source, pct: v });
-            }
+            const amp = v / 100;
+            softGainAmp = amp;
+            await invoke('tideline_plugin_request', {
+                pluginId: EFFECTS_PLUGIN_ID,
+                method: 'effects.set_input_gain',
+                params: { channel_uuid: inp.uuid, amp },
+            });
         } else if (sinkName) {
             await invoke('set_sink_volume', { name: sinkName, pct: v });
         }
     } catch {
         vol = prevVol;
-        cardControls = prevControls;
+        softGainAmp = prevAmp;
     }
 }
 

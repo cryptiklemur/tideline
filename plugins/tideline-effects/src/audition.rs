@@ -35,6 +35,10 @@ struct ActiveSession {
     channel_uuid: Uuid,
     phase: AuditionPhase,
     sample_path: Option<PathBuf>,
+    /// True if `sample_path` was created by us (e.g. /tmp/tideline-audition-*.wav
+    /// from a Record). False if the user supplied it via `load_file` — in
+    /// that case we must NOT delete it on discard.
+    owns_sample: bool,
     record_proc: Option<Child>,
     loop_cancel: Option<watch::Sender<bool>>,
     loop_task: Option<JoinHandle<()>>,
@@ -151,11 +155,90 @@ impl AuditionStore {
             channel_uuid: channel,
             phase: AuditionPhase::Recording,
             sample_path: Some(sample_path),
+            owns_sample: true,
             record_proc: Some(child),
             loop_cancel: None,
             loop_task: None,
             loop_pid: Arc::new(AtomicI32::new(0)),
         });
+        Ok(())
+    }
+
+    /// Use a user-selected audio file as the audition source. Puts the
+    /// session into Idle phase with sample_path set to the given path so
+    /// the next start_loop will play this file instead of a freshly
+    /// recorded sample. The file is referenced in place — not copied —
+    /// so caller is responsible for keeping the path alive while looping.
+    pub async fn load_file(&self, channel: Uuid, path: PathBuf) -> Result<(), String> {
+        let mut g = self.inner.lock().await;
+        match g.as_ref() {
+            Some(s) if s.phase != AuditionPhase::Idle => {
+                return Err(format!(
+                    "audition busy on channel {} (phase {:?})",
+                    s.channel_uuid, s.phase
+                ));
+            }
+            _ => {}
+        }
+        if !path.exists() {
+            return Err(format!("file does not exist: {}", path.display()));
+        }
+        if !path.is_file() {
+            return Err(format!("not a regular file: {}", path.display()));
+        }
+        info!(
+            target: "tideline-effects::audition",
+            %channel,
+            path = %path.display(),
+            "audition: loaded user file as source"
+        );
+        *g = Some(ActiveSession {
+            channel_uuid: channel,
+            phase: AuditionPhase::Idle,
+            sample_path: Some(path),
+            owns_sample: false,
+            record_proc: None,
+            loop_cancel: None,
+            loop_task: None,
+            loop_pid: Arc::new(AtomicI32::new(0)),
+        });
+        Ok(())
+    }
+
+    /// Copy the current audition sample to a user-chosen destination.
+    /// Requires an Idle session with a sample_path set (post-record or
+    /// post-load_file). Loop must be stopped first.
+    pub async fn save_recording(&self, channel: Uuid, dest: PathBuf) -> Result<(), String> {
+        let g = self.inner.lock().await;
+        let sess = g.as_ref().ok_or_else(|| "no audition session".to_string())?;
+        if sess.channel_uuid != channel {
+            return Err(format!(
+                "audition belongs to {}, not {channel}",
+                sess.channel_uuid
+            ));
+        }
+        if sess.phase != AuditionPhase::Idle {
+            return Err(format!(
+                "cannot save while phase is {:?} — stop the loop first",
+                sess.phase
+            ));
+        }
+        let src = sess
+            .sample_path
+            .as_ref()
+            .ok_or_else(|| "no sample to save".to_string())?;
+        if !src.exists() {
+            return Err(format!("source missing on disk: {}", src.display()));
+        }
+        std::fs::copy(src, &dest)
+            .map_err(|e| format!("copy {} -> {}: {e}", src.display(), dest.display()))?;
+        info!(
+            target: "tideline-effects::audition",
+            %channel,
+            src = %src.display(),
+            dest = %dest.display(),
+            "audition: sample saved"
+        );
         Ok(())
     }
 
@@ -366,7 +449,9 @@ impl AuditionStore {
                 let _ = task.await;
             }
             if let Some(p) = sess.sample_path.take() {
-                let _ = std::fs::remove_file(p);
+                if sess.owns_sample {
+                    let _ = std::fs::remove_file(p);
+                }
             }
             info!(
                 target: "tideline-effects::audition",
@@ -712,6 +797,49 @@ pub async fn handle_record_stop(
         "ok": true,
         "sample_path": path.to_string_lossy(),
     }))
+}
+
+
+#[derive(Deserialize)]
+struct LoadFileParams {
+    channel_uuid: Uuid,
+    path: String,
+}
+
+pub async fn handle_load_file(
+    state: &Arc<EffectsState>,
+    _host: Arc<HostClient>,
+    params: Option<Value>,
+) -> Result<Value, RpcError> {
+    let p: LoadFileParams = parse_params(params, "effects.audition_load_file")?;
+    let path = PathBuf::from(p.path);
+    state
+        .audition
+        .load_file(p.channel_uuid, path)
+        .await
+        .map_err(internal)?;
+    Ok(serde_json::json!({ "ok": true }))
+}
+
+#[derive(Deserialize)]
+struct SaveRecordingParams {
+    channel_uuid: Uuid,
+    path: String,
+}
+
+pub async fn handle_save_recording(
+    state: &Arc<EffectsState>,
+    _host: Arc<HostClient>,
+    params: Option<Value>,
+) -> Result<Value, RpcError> {
+    let p: SaveRecordingParams = parse_params(params, "effects.audition_save_recording")?;
+    let dest = PathBuf::from(p.path);
+    state
+        .audition
+        .save_recording(p.channel_uuid, dest)
+        .await
+        .map_err(internal)?;
+    Ok(serde_json::json!({ "ok": true }))
 }
 
 pub async fn handle_loop_start(

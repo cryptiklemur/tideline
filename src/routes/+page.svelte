@@ -631,6 +631,7 @@ onDestroy(() => pluginUi.teardown());
                 </header>
                 <div class="flex-1 p-4 overflow-y-auto">
                     <InputDetail
+                        channelUuid={activeInput.uuid}
                         name={activeInput.name}
                         kind={activeInput.kind}
                         sinkName={`sink.${slug(activeInput.name)}`}

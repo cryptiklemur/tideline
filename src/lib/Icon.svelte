@@ -56,6 +56,7 @@ import Star from '@lucide/svelte/icons/star';
 import Play from '@lucide/svelte/icons/play';
 import Square from '@lucide/svelte/icons/square';
 import Circle from '@lucide/svelte/icons/circle';
+import Download from '@lucide/svelte/icons/download';
 
 export const ICONS = {
     headphones: Headphones,
@@ -116,6 +117,7 @@ export const ICONS = {
     play: Play,
     square: Square,
     circle: Circle,
+    download: Download,
 } as const;
 
 export type IconName = keyof typeof ICONS;

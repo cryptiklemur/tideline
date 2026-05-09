@@ -11,6 +11,7 @@
     "core:window:allow-hide",
     "opener:default",
     "global-shortcut:default",
-    "pilot:default"
+    "pilot:default",
+    "dialog:default"
   ]
 }

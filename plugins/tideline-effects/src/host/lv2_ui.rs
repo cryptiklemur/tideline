@@ -24,8 +24,9 @@ use crate::host::{ParentWindow, PluginUi, UiController};
 use crate::suil_sys;
 use crate::ui_bridge::PluginWindow;
 
-const LV2_UI_X11_UI: &str = "http://lv2plug.in/ns/extensions/ui#X11UI";
+pub(super) const LV2_UI_X11_UI: &str = "http://lv2plug.in/ns/extensions/ui#X11UI";
 const LV2_UI_PARENT: &str = "http://lv2plug.in/ns/extensions/ui#parent";
+const LV2_INSTANCE_ACCESS: &str = "http://lv2plug.in/ns/ext/instance-access";
 const LV2_UI_IDLE_INTERFACE: &str = "http://lv2plug.in/ns/extensions/ui#idleInterface";
 /// Stub URI for the worker feature passed to `Features::iter_features` —
 /// livi requires a worker feature to satisfy the iterator signature, but we
@@ -169,8 +170,23 @@ pub(super) fn open(
         data: parent_window_id as *mut c_void,
     };
 
+    // instance-access lets the UI call the plugin's non-RT methods (e.g.
+    // extension_data, worker) directly via the LV2_Handle. rnnoise and
+    // other tightly-coupled DSP+UI plugins refuse to instantiate without it.
+    let instance_access_uri = CString::new(LV2_INSTANCE_ACCESS).unwrap();
+    let instance_handle: *mut c_void = plugin
+        .instance
+        .raw()
+        .instance()
+        .handle();
+    let instance_access_feature = LV2Feature {
+        uri: instance_access_uri.as_ptr(),
+        data: instance_handle,
+    };
+
     let mut features: Vec<*const LV2Feature> = Vec::new();
     features.push(&parent_feature);
+    features.push(&instance_access_feature);
     for f in plugin.features.iter_features(&stub_worker) {
         let uri = unsafe { CStr::from_ptr(f.uri) }.to_string_lossy();
         if uri == LV2_WORKER_SCHEDULE_URI {
@@ -207,6 +223,29 @@ pub(super) fn open(
             drop(Box::from_raw(controller_ptr));
         }
         anyhow::bail!("suil_instance_new returned null (UI failed to load)");
+    }
+
+    // Push current control_input values into the UI so widgets reflect the
+    // saved/persisted state on open. DPF-based UIs (ZamNoise and the rest of
+    // the Zam* family) do not read instance-access memory on first paint —
+    // they expect explicit port_event notifications to position their initial
+    // widget state. Without this every reopen of the plugin window shows the
+    // plugin's compiled-in default rather than the user's last saved value.
+    for param in &plugin.params {
+        if let Some(v) = plugin
+            .instance
+            .control_input(livi::PortIndex(param.index as usize))
+        {
+            unsafe {
+                suil_sys::suil_instance_port_event(
+                    instance,
+                    param.index,
+                    4,
+                    0,
+                    &v as *const f32 as *const c_void,
+                );
+            }
+        }
     }
 
     let idle_iface_c = CString::new(LV2_UI_IDLE_INTERFACE).unwrap();
@@ -275,25 +314,46 @@ unsafe extern "C" fn write_func(
     if protocol == 0 && buffer_size == 4 {
         // Float control write from the UI (the user moved a knob).
         let value = *(buffer as *const f32);
+        tracing::debug!(port_index, value, "ui→plugin control write");
         handle.controller.write_param(port_index, value);
         return;
     }
     if protocol == handle.event_transfer_urid {
         // Atom/event write from the UI — typically an LSP "subscribe to mesh
-        // X" Object atom. Forward to the audio thread so it can splice it
-        // into the matching atom_in port before the next plugin run.
+        // X" Object atom OR a patch:Set object for a plugin parameter.
+        // Forward to the audio thread so it can splice it into the matching
+        // atom_in port before the next plugin run.
         let Some(tx) = handle.ui_atom_tx.as_ref() else {
             return;
         };
         let bytes = std::slice::from_raw_parts(buffer as *const u8, buffer_size as usize);
-        let _ = tx.try_send(UiToPluginAtom {
+        let type_urid = if bytes.len() >= 8 {
+            u32::from_ne_bytes(bytes[4..8].try_into().unwrap())
+        } else {
+            0
+        };
+        tracing::debug!(
+            port_index,
+            buffer_size,
+            type_urid,
+            "ui→plugin atom write"
+        );
+        match tx.try_send(UiToPluginAtom {
             port_index,
             data: bytes.to_vec(),
-        });
+        }) {
+            Ok(_) => {}
+            Err(e) => tracing::warn!(?e, "ui→plugin atom queue send failed"),
+        }
         return;
     }
-    // Unknown protocol — silently drop. Logging here would spam the audio
-    // thread on hot UI paths and we have no way to recover anyway.
+    tracing::warn!(
+        port_index,
+        buffer_size,
+        protocol,
+        event_transfer_urid = handle.event_transfer_urid,
+        "ui→plugin write with unknown protocol — dropped"
+    );
 }
 
 unsafe extern "C" fn index_func(

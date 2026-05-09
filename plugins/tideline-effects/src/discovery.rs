@@ -41,8 +41,14 @@ pub fn categorize(class: &str) -> Category {
     }
 }
 
+// Bump when PluginInfo / scan logic changes meaning of cached entries
+// so old caches are silently invalidated on next boot.
+pub const CACHE_SCHEMA_VERSION: u32 = 2;
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct PluginScanCache {
+    #[serde(default)]
+    pub schema_version: u32,
     pub scanned_at: u64,
     pub source_mtime_max: u64,
     #[serde(default)]
@@ -129,6 +135,9 @@ pub fn source_entry_count() -> u64 {
 }
 
 pub fn cache_is_fresh(cache: &PluginScanCache) -> bool {
+    if cache.schema_version != CACHE_SCHEMA_VERSION {
+        return false;
+    }
     let current_mtime = max_source_mtime();
     if current_mtime == 0 {
         return false;
@@ -180,6 +189,7 @@ pub async fn ensure_cached(state: &EffectsState) -> PluginScanCache {
     }
     let plugins = scan_via_state(state);
     let fresh = PluginScanCache {
+        schema_version: CACHE_SCHEMA_VERSION,
         scanned_at: SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .map(|d| d.as_secs())
@@ -201,6 +211,7 @@ pub async fn run_first_boot(state: Arc<EffectsState>) {
             tracing::info!("effects plugin cache stale, rescanning");
             let plugins = scan_via_state(&state);
             let fresh = PluginScanCache {
+                schema_version: CACHE_SCHEMA_VERSION,
                 scanned_at: SystemTime::now()
                     .duration_since(SystemTime::UNIX_EPOCH)
                     .map(|d| d.as_secs())
@@ -216,6 +227,7 @@ pub async fn run_first_boot(state: Arc<EffectsState>) {
         tracing::info!("effects plugin cache missing, running first-boot scan");
         let plugins = scan_via_state(&state);
         let fresh = PluginScanCache {
+            schema_version: CACHE_SCHEMA_VERSION,
             scanned_at: SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .map(|d| d.as_secs())
@@ -237,6 +249,7 @@ mod tests {
     #[test]
     fn cache_is_fresh_returns_false_when_mtime_zero() {
         let cache = PluginScanCache {
+            schema_version: CACHE_SCHEMA_VERSION,
             scanned_at: 0,
             source_mtime_max: 1,
             source_entry_count: 0,

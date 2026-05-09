@@ -1,10 +1,11 @@
-use tideline_effects::discovery::{cache_is_fresh, load_cache, save_cache, PluginScanCache};
+use tideline_effects::discovery::{cache_is_fresh, load_cache, save_cache, CACHE_SCHEMA_VERSION, PluginScanCache};
 
 #[test]
 fn save_and_load_cache_round_trips() {
     let dir = tempfile::tempdir().unwrap();
     std::env::set_var("XDG_CACHE_HOME", dir.path());
     let cache = PluginScanCache {
+        schema_version: CACHE_SCHEMA_VERSION,
         scanned_at: 12345,
         source_mtime_max: 67890,
         source_entry_count: 0,

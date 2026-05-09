@@ -1,6 +1,7 @@
 <script lang="ts">
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { onDestroy, onMount } from 'svelte';
 import Icon from '$lib/Icon.svelte';
 import PluginPickerModal from './PluginPickerModal.svelte';
@@ -26,6 +27,60 @@ let recordingStartedAt = $state<number | null>(null);
 let recordingElapsed = $state(0);
 let recordTimer: ReturnType<typeof setInterval> | null = null;
 let auditionVisible = $derived(channelKind === 'physical_input' && (physicalSource ?? '').length > 0);
+
+let lowcutOn = $state(false);
+let clipguardOn = $state(false);
+let dspBusy = $state(false);
+
+async function pullDspState() {
+    try {
+        const s = await invoke<{ lowcut: boolean; clipguard: boolean }>('tideline_plugin_request', {
+            pluginId,
+            method: 'effects.get_dsp_state',
+            params: { channel_uuid: channelUuid },
+        });
+        lowcutOn = s.lowcut;
+        clipguardOn = s.clipguard;
+    } catch (e) {
+        console.warn('get_dsp_state failed', e);
+    }
+}
+
+async function toggleLowcut() {
+    if (dspBusy) return;
+    dspBusy = true;
+    const next = !lowcutOn;
+    try {
+        await invoke('tideline_plugin_request', {
+            pluginId,
+            method: 'effects.set_lowcut',
+            params: { channel_uuid: channelUuid, enabled: next },
+        });
+        lowcutOn = next;
+    } catch (e) {
+        console.warn('set_lowcut failed', e);
+    } finally {
+        dspBusy = false;
+    }
+}
+
+async function toggleClipguard() {
+    if (dspBusy) return;
+    dspBusy = true;
+    const next = !clipguardOn;
+    try {
+        await invoke('tideline_plugin_request', {
+            pluginId,
+            method: 'effects.set_clipguard',
+            params: { channel_uuid: channelUuid, enabled: next },
+        });
+        clipguardOn = next;
+    } catch (e) {
+        console.warn('set_clipguard failed', e);
+    } finally {
+        dspBusy = false;
+    }
+}
 
 async function pullAuditionState() {
     try {
@@ -157,6 +212,66 @@ async function auditionPause() {
     }
 }
 
+async function auditionLoadFile() {
+    if (auditionBusy) return;
+    auditionError = null;
+    let picked: string | null = null;
+    try {
+        picked = await openDialog({
+            multiple: false,
+            directory: false,
+            filters: [{ name: 'Audio', extensions: ['wav', 'flac', 'ogg', 'mp3'] }],
+        });
+    } catch (e) {
+        auditionError = String(e);
+        return;
+    }
+    if (!picked) return;
+    auditionBusy = true;
+    try {
+        await invoke('tideline_plugin_request', {
+            pluginId,
+            method: 'effects.audition_load_file',
+            params: { channel_uuid: channelUuid, path: picked },
+        });
+        auditionPhase = 'idle';
+        auditionHasSample = true;
+    } catch (e) {
+        auditionError = String(e);
+    } finally {
+        auditionBusy = false;
+    }
+}
+
+async function auditionSaveRecording() {
+    if (auditionBusy || !auditionHasSample) return;
+    auditionError = null;
+    let dest: string | null = null;
+    const safeName = (channelName ?? 'channel').replace(/[^A-Za-z0-9._-]+/g, '_');
+    try {
+        dest = await saveDialog({
+            defaultPath: `tideline-audition-${safeName}.wav`,
+            filters: [{ name: 'WAV', extensions: ['wav'] }],
+        });
+    } catch (e) {
+        auditionError = String(e);
+        return;
+    }
+    if (!dest) return;
+    auditionBusy = true;
+    try {
+        await invoke('tideline_plugin_request', {
+            pluginId,
+            method: 'effects.audition_save_recording',
+            params: { channel_uuid: channelUuid, path: dest },
+        });
+    } catch (e) {
+        auditionError = String(e);
+    } finally {
+        auditionBusy = false;
+    }
+}
+
 async function auditionResume() {
     if (auditionBusy) return;
     auditionBusy = true;
@@ -230,7 +345,11 @@ async function emit(e: UiEvent) {
                 params: {
                     channel_uuid: channelUuid,
                     node_id: e.node_id,
-                    value: e.value && 'value' in e.value ? (e.value as { value: unknown }).value : null,
+                    value: e.value && 'value' in e.value
+                        ? (e.value as { value: unknown }).value
+                        : e.value && e.value.type !== 'click'
+                            ? e.value
+                            : null,
                 },
             },
         );
@@ -252,6 +371,7 @@ async function emit(e: UiEvent) {
 onMount(async () => {
     dlg?.showModal();
     await refresh();
+    void pullDspState();
     if (auditionVisible) {
         await pullAuditionState();
     }
@@ -356,6 +476,49 @@ function onKeydown(ev: KeyboardEvent) {
             </button>
         </header>
 
+        <div class="px-5 py-2 border-b border-base-content/10 bg-base-200/40 flex items-center gap-2 shrink-0">
+            <span class="text-[10px] font-bold uppercase tracking-widest text-base-content/55">
+                Cleanup
+            </span>
+            <div class="flex items-center gap-2 flex-1">
+                <button
+                    type="button"
+                    class="btn btn-xs {lowcutOn ? 'btn-primary' : 'btn-ghost'}"
+                    onclick={() => void toggleLowcut()}
+                    disabled={dspBusy}
+                    title="80Hz high-pass filter, runs before the FX chain — removes rumble and handling noise"
+                    aria-pressed={lowcutOn}
+                >
+                    <Icon name="audio-lines" size={12} />
+                    Lowcut
+                    <span class="text-[10px] opacity-70 tabular-nums">80Hz</span>
+                </button>
+                <button
+                    type="button"
+                    class="btn btn-xs {clipguardOn ? 'btn-primary' : 'btn-ghost'}"
+                    onclick={() => void toggleClipguard()}
+                    disabled={dspBusy}
+                    title="Soft-clip ceiling at -1dBFS, runs after the FX chain — catches any plugin pushing signal too hot"
+                    aria-pressed={clipguardOn}
+                >
+                    <Icon name="shield-check" size={12} />
+                    Clipguard
+                    <span class="text-[10px] opacity-70 tabular-nums">-1dBFS</span>
+                </button>
+                <span class="text-[11px] text-base-content/45 ml-1">
+                    {#if !lowcutOn && !clipguardOn}
+                        helps with rumble and clipping
+                    {:else if lowcutOn && clipguardOn}
+                        rumble cut, ceiling armed
+                    {:else if lowcutOn}
+                        rumble cut active
+                    {:else}
+                        ceiling armed
+                    {/if}
+                </span>
+            </div>
+        </div>
+
         {#if auditionVisible}
             <div class="px-5 py-2 border-b border-base-content/10 bg-base-200/40 flex items-center gap-2 shrink-0">
                 <span class="text-[10px] font-bold uppercase tracking-widest text-base-content/55">
@@ -373,21 +536,41 @@ function onKeydown(ev: KeyboardEvent) {
                             <span class="size-2 rounded-full bg-error-content/90 animate-none"></span>
                             {auditionHasSample ? 'Re-record' : 'Record'}
                         </button>
+                        <button
+                            type="button"
+                            class="btn btn-xs btn-ghost"
+                            onclick={() => void auditionLoadFile()}
+                            disabled={auditionBusy}
+                            title="Load an audio file (wav/flac/ogg/mp3) to audition through the chain"
+                        >
+                            <Icon name="folder" size={12} />
+                            Load file
+                        </button>
                         {#if auditionHasSample}
                             <button
                                 type="button"
                                 class="btn btn-xs btn-primary"
                                 onclick={() => void auditionPlay()}
                                 disabled={auditionBusy}
-                                title="Loop the recorded sample through the FX chain"
+                                title="Loop the sample through the FX chain"
                             >
                                 <Icon name="play" size={12} />
                                 Play loop
                             </button>
+                            <button
+                                type="button"
+                                class="btn btn-xs btn-ghost"
+                                onclick={() => void auditionSaveRecording()}
+                                disabled={auditionBusy}
+                                title="Save a copy of the recorded sample"
+                            >
+                                <Icon name="download" size={12} />
+                                Save
+                            </button>
                             <span class="text-[11px] text-base-content/55">sample ready</span>
                         {:else}
                             <span class="text-[11px] text-base-content/45">
-                                record a sample to audition effects without talking
+                                record or load a sample to audition effects without talking
                             </span>
                         {/if}
                     {:else if auditionPhase === 'recording'}

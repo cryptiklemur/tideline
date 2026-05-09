@@ -56,7 +56,7 @@ impl JsonRpcTransport {
                     Ok(Some(f)) => f,
                     Ok(None) => break,
                     Err(e) => {
-                        tracing::debug!(error=%e, "transport read err");
+                        tracing::warn!(error=%e, "transport read err — plugin stdout corrupted");
                         break;
                     }
                 };

@@ -978,22 +978,16 @@ pub async fn wire_fx_links(cfg: &AppConfig) {
     let mut pairs: Vec<(String, String)> = Vec::new();
     for ch in &cfg.channels {
         let effects_data = ch.plugin_data.get("tideline-effects");
-        let any_active = effects_data
+        // Wire whenever the channel has ANY effects in its rack, bypassed
+        // or not. Per-effect and chain-level bypass are handled at runtime
+        // by the JACK ProcessHandler — pipewire routing stays stable so
+        // bypass toggles never reshape the conf or trigger restarts.
+        let has_any_effects = effects_data
             .and_then(|v| v.get("effects"))
             .and_then(|e| e.as_array())
-            .map(|a| {
-                a.iter().any(|e| {
-                    !e.get("bypassed")
-                        .and_then(|b| b.as_bool())
-                        .unwrap_or(false)
-                })
-            })
+            .map(|a| !a.is_empty())
             .unwrap_or(false);
-        let chain_bypassed = effects_data
-            .and_then(|v| v.get("chain_bypassed"))
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        if !any_active || chain_bypassed {
+        if !has_any_effects {
             continue;
         }
         if matches!(ch.kind, ChannelKind::PhysicalInput) && ch.physical_source.is_empty() {
@@ -2148,6 +2142,8 @@ mod glog_filter {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let _log_guard = tideline_sdk::logging::init("tideline");
+
     #[cfg(target_os = "linux")]
     {
         // KWin 6.6 + NVIDIA + webkit2gtk 2.52 trip wp_linux_drm_syncobj_surface_v1
@@ -2170,7 +2166,8 @@ pub fn run() {
         .register_uri_scheme_protocol("tideline-plugin", |ctx, req| {
             plugins::handle_request(ctx, req)
         })
-        .plugin(tauri_plugin_opener::init());
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init());
 
     #[cfg(debug_assertions)]
     {

@@ -37,6 +37,13 @@ pub struct AudioEngine {
     active_uis: Mutex<HashMap<(Uuid, Uuid), ActiveUi>>,
     sample_rate: f64,
     buffer_size: u32,
+    /// Debounced save trigger. Pinged from the UI write path
+    /// (`set_param`) and from `tick_idle_uis` when a plugin window
+    /// closes. EffectsState wires a tokio task on this Notify that
+    /// runs `refresh_state_and_save` after a short debounce, so
+    /// settings persist within a fraction of a second of the user
+    /// moving a knob — no waiting for the 10s background tick.
+    save_trigger: Arc<tokio::sync::Notify>,
 }
 
 /// Bridges UI-side parameter writes (suil → write_func) back into the engine's
@@ -74,7 +81,20 @@ impl AudioEngine {
             active_uis: Mutex::new(HashMap::new()),
             sample_rate,
             buffer_size,
+            save_trigger: Arc::new(tokio::sync::Notify::new()),
         })
+    }
+
+
+    /// Handle that callers nudge to request a debounced save. State spawns
+    /// the consuming task in `set_engine` so the engine itself stays
+    /// agnostic about persistence.
+    pub fn save_trigger(&self) -> Arc<tokio::sync::Notify> {
+        self.save_trigger.clone()
+    }
+
+    fn nudge_save(&self) {
+        self.save_trigger.notify_one();
     }
 
     pub fn sample_rate(&self) -> f64 {
@@ -127,6 +147,19 @@ impl AudioEngine {
                 warn!(?e, plugin = %info.uri, "load_state failed; using defaults");
             }
         }
+        // Drop any existing slot with this id before pushing the new one.
+        // apply_persisted_chains can run twice in one boot (chains.json
+        // load + pipewire_contributor first-call AppConfig sync). Without
+        // this, both calls push duplicate Lv2Plugin instances; the audio
+        // path then drives them in sequence and snapshot_all_states folds
+        // them with HashMap::insert, last-write-wins. The stale instance
+        // (loaded second from out-of-sync AppConfig) clobbers the live
+        // one, and every subsequent UI param tweak gets overwritten on
+        // the next save tick. Replacing in place keeps the invariant that
+        // a slot id maps to exactly one plugin instance.
+        if let Some(_old) = channel.remove_slot(slot_id) {
+            tracing::debug!(?channel_id, ?slot_id, plugin = %info.uri, "add_plugin: replacing existing slot with same id");
+        }
         channel.push_slot(Slot {
             id: slot_id,
             bypass: false,
@@ -176,6 +209,34 @@ impl AudioEngine {
         Ok(())
     }
 
+
+    pub fn set_lowcut(&self, channel_id: Uuid, enabled: bool) -> anyhow::Result<()> {
+        let channels = self.channels.lock();
+        let channel = channels
+            .get(&channel_id)
+            .ok_or_else(|| anyhow::anyhow!("channel {channel_id} not opened"))?;
+        channel.set_lowcut(enabled);
+        Ok(())
+    }
+
+    pub fn set_clipguard(&self, channel_id: Uuid, enabled: bool) -> anyhow::Result<()> {
+        let channels = self.channels.lock();
+        let channel = channels
+            .get(&channel_id)
+            .ok_or_else(|| anyhow::anyhow!("channel {channel_id} not opened"))?;
+        channel.set_clipguard(enabled);
+        Ok(())
+    }
+
+    pub fn set_input_gain(&self, channel_id: Uuid, amp: f32) -> anyhow::Result<()> {
+        let channels = self.channels.lock();
+        let channel = channels
+            .get(&channel_id)
+            .ok_or_else(|| anyhow::anyhow!("channel {channel_id} not opened"))?;
+        channel.set_input_gain(amp);
+        Ok(())
+    }
+
     pub fn set_param(
         &self,
         channel_id: Uuid,
@@ -190,6 +251,8 @@ impl AudioEngine {
         channel
             .with_slot_mut(slot_id, |slot| slot.plugin.set_param(index, value))
             .ok_or_else(|| anyhow::anyhow!("slot {slot_id} not in channel {channel_id}"))?;
+        drop(channels);
+        self.nudge_save();
         Ok(())
     }
 
@@ -311,9 +374,27 @@ impl AudioEngine {
             }
         }
         if !to_remove.is_empty() {
-            let mut uis = self.active_uis.lock();
-            for key in to_remove {
-                uis.remove(&key);
+            // Move entries out of the map under the lock, then drop OUTSIDE
+            // the lock and on a blocking thread. Drop is slow for DPF/Cairo
+            // LV2 UIs because suil_instance_free tears down GL contexts and
+            // PluginWindow::drop does a synchronous DestroyWindow round-trip
+            // to the X server. Holding active_uis across that wedges every
+            // other consumer (open_ui_for_slot, clear_state, the iframe
+            // bridge's persist path) and stalls the rack dialog close.
+            let mut removed = Vec::with_capacity(to_remove.len());
+            {
+                let mut uis = self.active_uis.lock();
+                for key in to_remove {
+                    if let Some(active) = uis.remove(&key) {
+                        removed.push(active);
+                    }
+                }
+            }
+            if !removed.is_empty() {
+                // User closed the plugin window — flush any pending param
+                // tweaks that haven't been picked up by the periodic tick yet.
+                self.nudge_save();
+                tokio::task::spawn_blocking(move || drop(removed));
             }
         }
     }

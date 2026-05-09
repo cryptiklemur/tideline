@@ -179,6 +179,9 @@ async fn handle(
 pub(crate) async fn snapshot_channel(state: &Arc<EffectsState>, channel: Uuid) -> ChannelEffectsData {
     let order = state.chain_order(channel).await;
     let chain_bypassed = state.get_chain_bypass(channel).await;
+    let lowcut = state.get_lowcut(channel).await;
+    let clipguard = state.get_clipguard(channel).await;
+    let input_gain = state.get_input_gain(channel).await;
     let effects_map = state.effects.lock().await;
     let mut effects = Vec::with_capacity(order.len());
     for eid in &order {
@@ -186,7 +189,7 @@ pub(crate) async fn snapshot_channel(state: &Arc<EffectsState>, channel: Uuid) -
             effects.push(slot.effect.clone());
         }
     }
-    ChannelEffectsData { effects, chain_bypassed }
+    ChannelEffectsData { effects, chain_bypassed, lowcut, clipguard, input_gain }
 }
 
 pub(crate) async fn persist_channel(
