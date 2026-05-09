@@ -1,3 +1,10 @@
+## [1.0.1](https://github.com/cryptiklemur/tideline/compare/v1.0.0...v1.0.1) (2026-05-09)
+
+
+### Bug Fixes
+
+* **tauri:** use cfg-shadowed builder binding so non-debug build has no unused mut ([83e23d3](https://github.com/cryptiklemur/tideline/commit/83e23d3f713a051031c49c89c692878605d224b8))
+
 # 1.0.0 (2026-05-09)
 
 
