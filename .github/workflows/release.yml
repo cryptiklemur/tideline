@@ -2,18 +2,26 @@ name: Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches: [main]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 permissions:
   contents: write
+  issues: write
+  pull-requests: write
 
 jobs:
   release:
-    name: Build & publish (Linux)
+    name: semantic-release + tauri bundles
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
 
       - name: Install system deps
         run: |
@@ -50,24 +58,11 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - name: Resolve tag
-        id: tag
-        env:
-          REF_NAME: ${{ github.ref_name }}
-        run: |
-          echo "tag=${REF_NAME}" >> "$GITHUB_OUTPUT"
-          echo "version=${REF_NAME#v}" >> "$GITHUB_OUTPUT"
-
-      - uses: tauri-apps/tauri-action@v0
+      - name: semantic-release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tagName: ${{ steps.tag.outputs.tag }}
-          releaseName: 'tideline ${{ steps.tag.outputs.tag }}'
-          releaseBody: |
-            Heavy WIP release. APIs and config formats are not stable.
-
-            See the commit log for details.
-          releaseDraft: false
-          prerelease: false
-          args: --bundles deb,rpm,appimage
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+        run: pnpm exec semantic-release
