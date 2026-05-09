@@ -38,8 +38,12 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    #[test] fn renders_two_controls_with_current_values() {
-        let cfg = TonesConfig { enabled: false, volume: 42 };
+    #[test]
+    fn renders_two_controls_with_current_values() {
+        let cfg = TonesConfig {
+            enabled: false,
+            volume: 42,
+        };
         let v = serde_json::to_value(render(&cfg)).unwrap();
         assert_eq!(v["kind"], "section");
         assert_eq!(v["children"].as_array().unwrap().len(), 2);
@@ -53,7 +57,8 @@ mod tests {
         assert_eq!(v["children"][1]["max"], json!(100));
     }
 
-    #[test] fn renders_default_values() {
+    #[test]
+    fn renders_default_values() {
         let v = serde_json::to_value(render(&TonesConfig::default())).unwrap();
         assert_eq!(v["children"][0]["value"], json!(true));
         assert_eq!(v["children"][1]["value"], json!(100));

@@ -213,8 +213,12 @@ impl jack::ProcessHandler for ProcessHandler {
             out_l[..frames].copy_from_slice(in_l);
             out_r[..frames].copy_from_slice(in_r);
             if apply_gain {
-                for s in &mut out_l[..frames] { *s *= gain; }
-                for s in &mut out_r[..frames] { *s *= gain; }
+                for s in &mut out_l[..frames] {
+                    *s *= gain;
+                }
+                for s in &mut out_r[..frames] {
+                    *s *= gain;
+                }
             }
             return jack::Control::Continue;
         }
@@ -233,12 +237,18 @@ impl jack::ProcessHandler for ProcessHandler {
                 out_l[..frames].copy_from_slice(in_l);
                 out_r[..frames].copy_from_slice(in_r);
                 if lowcut_on {
-                    self.hpf_coefs.process(&mut self.hpf_l, &mut out_l[..frames]);
-                    self.hpf_coefs.process(&mut self.hpf_r, &mut out_r[..frames]);
+                    self.hpf_coefs
+                        .process(&mut self.hpf_l, &mut out_l[..frames]);
+                    self.hpf_coefs
+                        .process(&mut self.hpf_r, &mut out_r[..frames]);
                 }
                 if apply_gain {
-                    for s in &mut out_l[..frames] { *s *= gain; }
-                    for s in &mut out_r[..frames] { *s *= gain; }
+                    for s in &mut out_l[..frames] {
+                        *s *= gain;
+                    }
+                    for s in &mut out_r[..frames] {
+                        *s *= gain;
+                    }
                 }
                 if clipguard_on {
                     soft_clip_inplace(&mut out_l[..frames], self.clip_ceiling);
@@ -268,8 +278,12 @@ impl jack::ProcessHandler for ProcessHandler {
         // wants regardless of hardware preamp behavior (e.g. Wave XLR
         // firmware clipguard plateau).
         if apply_gain {
-            for s in a_l.iter_mut() { *s *= gain; }
-            for s in a_r.iter_mut() { *s *= gain; }
+            for s in a_l.iter_mut() {
+                *s *= gain;
+            }
+            for s in a_r.iter_mut() {
+                *s *= gain;
+            }
         }
 
         if chain.is_empty() {
@@ -303,13 +317,13 @@ impl jack::ProcessHandler for ProcessHandler {
 
         let out_l = self.out_l.as_mut_slice(ps);
         let out_r = self.out_r.as_mut_slice(ps);
-        if wrote_any {
-            out_l[..frames].copy_from_slice(src_l);
-            out_r[..frames].copy_from_slice(src_r);
-        } else {
-            out_l[..frames].copy_from_slice(src_l);
-            out_r[..frames].copy_from_slice(src_r);
-        }
+        // Both the chain-output and chain-bypass branches resolve to copying
+        // src_l/src_r into the output ports — wrote_any is reserved here for
+        // future divergence (e.g. routing post-FX vs pre-FX) so leave the
+        // flag in scope but do the copy unconditionally for now.
+        let _ = wrote_any;
+        out_l[..frames].copy_from_slice(src_l);
+        out_r[..frames].copy_from_slice(src_r);
 
         // Clipguard runs post-chain — catches anything the chain pushed
         // hot. Soft tanh keeps signal under -1 dBFS without hard clipping.
@@ -320,7 +334,6 @@ impl jack::ProcessHandler for ProcessHandler {
         jack::Control::Continue
     }
 }
-
 
 /// RBJ cookbook biquad. Holds the normalized coefficients; per-channel
 /// state lives in `BiquadState` so a single coefficient set drives both
@@ -361,7 +374,8 @@ impl Biquad {
     pub fn process(&self, st: &mut BiquadState, buf: &mut [f32]) {
         for s in buf.iter_mut() {
             let x = *s;
-            let y = self.b0 * x + self.b1 * st.x1 + self.b2 * st.x2 - self.a1 * st.y1 - self.a2 * st.y2;
+            let y =
+                self.b0 * x + self.b1 * st.x1 + self.b2 * st.x2 - self.a1 * st.y1 - self.a2 * st.y2;
             st.x2 = st.x1;
             st.x1 = x;
             st.y2 = st.y1;

@@ -23,14 +23,23 @@ priority = 50
 "#;
     let m: PluginManifest = toml::from_str(toml_src).unwrap();
     assert_eq!(m.channel_overlays.len(), 2);
-    assert!(matches!(m.channel_overlays[0].scope, OverlayScope::AllChannels));
-    assert!(matches!(m.channel_overlays[0].surface, OverlaySurface::CardExtension));
+    assert!(matches!(
+        m.channel_overlays[0].scope,
+        OverlayScope::AllChannels
+    ));
+    assert!(matches!(
+        m.channel_overlays[0].surface,
+        OverlaySurface::CardExtension
+    ));
     if let OverlayScope::ChannelKinds { kinds } = &m.channel_overlays[1].scope {
         assert_eq!(kinds.len(), 1);
     } else {
         panic!("expected ChannelKinds");
     }
-    assert!(matches!(m.channel_overlays[1].surface, OverlaySurface::PanelSection));
+    assert!(matches!(
+        m.channel_overlays[1].surface,
+        OverlaySurface::PanelSection
+    ));
     assert_eq!(m.pipewire.as_ref().unwrap().priority, 50);
 }
 

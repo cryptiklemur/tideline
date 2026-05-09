@@ -56,7 +56,6 @@ impl LevelMonitor {
             thread::spawn(move || worker(app, name, cancel));
         }
     }
-
 }
 
 fn worker(app: AppHandle, source: String, cancel: Arc<AtomicBool>) {

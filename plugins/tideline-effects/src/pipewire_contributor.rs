@@ -7,8 +7,12 @@ use std::sync::Arc;
 use serde_json::Value;
 use tideline_core::config_io::slug;
 use tideline_core::model::{AppConfig, ChannelCfg, ChannelKind, Mix};
-use tideline_core::pipewire::directive::{ArgValue, LoadModuleHeader, PipewireDirective, RewireableTag};
-use tideline_core::pipewire::{fx_source_node, mix_capture_node, mix_playback_node, sink_node_for_channel};
+use tideline_core::pipewire::directive::{
+    ArgValue, LoadModuleHeader, PipewireDirective, RewireableTag,
+};
+use tideline_core::pipewire::{
+    fx_source_node, mix_capture_node, mix_playback_node, sink_node_for_channel,
+};
 use tideline_sdk::contribute::{MixMuteEntry, PipewireContributeRequest};
 use tideline_sdk::rpc::{error_codes, RpcError};
 
@@ -123,10 +127,7 @@ fn persisted_chains_from_appconfig(cfg: &AppConfig) -> crate::persist::Persisted
     }
 }
 
-pub fn build_all_directives(
-    cfg: &AppConfig,
-    mix_mutes: &[MixMuteEntry],
-) -> Vec<PipewireDirective> {
+pub fn build_all_directives(cfg: &AppConfig, mix_mutes: &[MixMuteEntry]) -> Vec<PipewireDirective> {
     let mut out = Vec::new();
     for ch in &cfg.channels {
         let data = read_effects_data(ch);
@@ -134,10 +135,7 @@ pub fn build_all_directives(
             continue;
         }
         out.extend(build_directives_for_channel(
-            ch,
-            &cfg.mixes,
-            &data,
-            mix_mutes,
+            ch, &cfg.mixes, &data, mix_mutes,
         ));
     }
     out
@@ -227,13 +225,19 @@ pub fn build_directives_for_channel(
             for (i, src) in ch.sources.iter().enumerate() {
                 out.push(loopback(
                     vec![
-                        ("node.name".into(), quoted(format!("capture.{s}-fx-src-{i}"))),
+                        (
+                            "node.name".into(),
+                            quoted(format!("capture.{s}-fx-src-{i}")),
+                        ),
                         ("target.object".into(), quoted(src)),
                         ("audio.position".into(), fl_fr()),
                         ("stream.dont-remix".into(), literal("true")),
                     ],
                     vec![
-                        ("node.name".into(), quoted(format!("playback.{s}-fx-src-{i}"))),
+                        (
+                            "node.name".into(),
+                            quoted(format!("playback.{s}-fx-src-{i}")),
+                        ),
                         ("target.object".into(), quoted(&fx_node)),
                         ("node.autoconnect".into(), literal("false")),
                         ("audio.position".into(), fl_fr()),
@@ -397,7 +401,10 @@ mod tests {
 
     fn one_effect_data() -> ChannelEffectsData {
         ChannelEffectsData {
-            effects: vec![make_effect(Uuid::nil(), "http://lsp-plug.in/plugins/lv2/gate_mono")],
+            effects: vec![make_effect(
+                Uuid::nil(),
+                "http://lsp-plug.in/plugins/lv2/gate_mono",
+            )],
             chain_bypassed: false,
             lowcut: false,
             clipguard: false,
@@ -408,9 +415,18 @@ mod tests {
     fn three_effect_data() -> ChannelEffectsData {
         ChannelEffectsData {
             effects: vec![
-                make_effect(Uuid::from_u128(1), "http://lsp-plug.in/plugins/lv2/gate_stereo"),
-                make_effect(Uuid::from_u128(2), "http://lsp-plug.in/plugins/lv2/para_equalizer_x16_stereo"),
-                make_effect(Uuid::from_u128(3), "http://lsp-plug.in/plugins/lv2/sc_compressor_stereo"),
+                make_effect(
+                    Uuid::from_u128(1),
+                    "http://lsp-plug.in/plugins/lv2/gate_stereo",
+                ),
+                make_effect(
+                    Uuid::from_u128(2),
+                    "http://lsp-plug.in/plugins/lv2/para_equalizer_x16_stereo",
+                ),
+                make_effect(
+                    Uuid::from_u128(3),
+                    "http://lsp-plug.in/plugins/lv2/sc_compressor_stereo",
+                ),
             ],
             chain_bypassed: false,
             lowcut: false,
@@ -450,9 +466,10 @@ mod tests {
         let mut data = one_effect_data();
         data.chain_bypassed = true;
         let mut ch_bypassed = ch;
-        ch_bypassed
-            .plugin_data
-            .insert("tideline-effects".into(), serde_json::to_value(data).unwrap());
+        ch_bypassed.plugin_data.insert(
+            "tideline-effects".into(),
+            serde_json::to_value(data).unwrap(),
+        );
         cfg_bypassed.channels.push(ch_bypassed);
         cfg_bypassed.mixes.push(one_mix("default"));
 
@@ -483,9 +500,10 @@ mod tests {
             e.bypassed = true;
         }
         let mut ch_bypassed = ch;
-        ch_bypassed
-            .plugin_data
-            .insert("tideline-effects".into(), serde_json::to_value(data).unwrap());
+        ch_bypassed.plugin_data.insert(
+            "tideline-effects".into(),
+            serde_json::to_value(data).unwrap(),
+        );
         cfg_bypassed.channels.push(ch_bypassed);
         cfg_bypassed.mixes.push(one_mix("default"));
 
@@ -592,8 +610,10 @@ mod tests {
         data.effects[1].bypassed = true; // middle one bypassed
         let mut cfg = AppConfig::default();
         let mut ch2 = ch;
-        ch2.plugin_data
-            .insert("tideline-effects".into(), serde_json::to_value(data).unwrap());
+        ch2.plugin_data.insert(
+            "tideline-effects".into(),
+            serde_json::to_value(data).unwrap(),
+        );
         cfg.channels.push(ch2);
         cfg.mixes.push(one_mix("default_sink"));
 
@@ -612,8 +632,10 @@ mod tests {
         data.effects[0].bypassed = true;
         let mut cfg = AppConfig::default();
         let mut ch2 = ch;
-        ch2.plugin_data
-            .insert("tideline-effects".into(), serde_json::to_value(data).unwrap());
+        ch2.plugin_data.insert(
+            "tideline-effects".into(),
+            serde_json::to_value(data).unwrap(),
+        );
         cfg.channels.push(ch2);
         cfg.mixes.push(one_mix("default_sink"));
 

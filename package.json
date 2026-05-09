@@ -27,13 +27,13 @@
     "@semantic-release/git": "^10.0.1",
     "@sveltejs/adapter-static": "^3.0.6",
     "@sveltejs/kit": "^2.9.0",
-    "@sveltejs/vite-plugin-svelte": "^5.0.0",
+    "@sveltejs/vite-plugin-svelte": "^5.1.1",
     "@tailwindcss/vite": "^4.2.4",
     "@tauri-apps/cli": "^2",
     "@testing-library/jest-dom": "6.6.3",
     "@testing-library/svelte": "5.2.4",
     "@types/node": "^25.6.0",
-    "@vitest/ui": "2.1.8",
+    "@vitest/ui": "3.2.4",
     "daisyui": "^5.5.19",
     "jsdom": "25.0.1",
     "semantic-release": "^25.0.3",
@@ -42,6 +42,6 @@
     "tailwindcss": "^4.2.4",
     "typescript": "~5.6.2",
     "vite": "^6.0.3",
-    "vitest": "2.1.8"
+    "vitest": "3.2.4"
   }
 }

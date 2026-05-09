@@ -22,9 +22,15 @@ fn loading_legacy_config_writes_backup_once() {
     let cfg = load_config_from(&path).unwrap();
     save_config_to(&path, &cfg).unwrap();
 
-    assert!(backup.exists(), "backup file must be written on first migration");
+    assert!(
+        backup.exists(),
+        "backup file must be written on first migration"
+    );
     let backup_contents = fs::read_to_string(&backup).unwrap();
-    assert_eq!(backup_contents, legacy, "backup must be byte-identical to original");
+    assert_eq!(
+        backup_contents, legacy,
+        "backup must be byte-identical to original"
+    );
 }
 
 #[test]

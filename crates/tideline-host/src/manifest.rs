@@ -54,8 +54,8 @@ pub fn validate(m: &Manifest) -> Result<(), ManifestError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tideline_sdk::Capability;
     use tideline_sdk::types::*;
+    use tideline_sdk::Capability;
 
     fn good() -> Manifest {
         Manifest {
@@ -67,7 +67,9 @@ mod tests {
                 publisher: "Tideline".into(),
             },
             host: ManifestHost { api: "1.x".into() },
-            entry: ManifestEntry { exec: "tideline-test-plugin".into() },
+            entry: ManifestEntry {
+                exec: "tideline-test-plugin".into(),
+            },
             capabilities: ManifestCapabilities {
                 required: vec![Capability::ChannelRead],
                 optional: vec![],
@@ -95,13 +97,19 @@ mod tests {
     fn rejects_optional_overlap_required() {
         let mut m = good();
         m.capabilities.optional = vec![Capability::ChannelRead];
-        assert!(matches!(validate(&m), Err(ManifestError::OptionalConflictsRequired(_))));
+        assert!(matches!(
+            validate(&m),
+            Err(ManifestError::OptionalConflictsRequired(_))
+        ));
     }
 
     #[test]
     fn rejects_schema_2() {
         let mut m = good();
         m.plugin.schema = 2;
-        assert!(matches!(validate(&m), Err(ManifestError::UnsupportedSchema(2))));
+        assert!(matches!(
+            validate(&m),
+            Err(ManifestError::UnsupportedSchema(2))
+        ));
     }
 }

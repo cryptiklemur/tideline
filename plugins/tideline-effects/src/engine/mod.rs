@@ -66,11 +66,9 @@ impl UiController for EngineUiController {
 
 impl AudioEngine {
     pub fn new(formats: Arc<FormatRegistry>) -> anyhow::Result<Self> {
-        let (probe, _status) = jack::Client::new(
-            "tideline-fx-probe",
-            jack::ClientOptions::default(),
-        )
-        .context("failed to open jack probe client")?;
+        let (probe, _status) =
+            jack::Client::new("tideline-fx-probe", jack::ClientOptions::default())
+                .context("failed to open jack probe client")?;
         let sample_rate = probe.sample_rate() as f64;
         let buffer_size = probe.buffer_size();
         drop(probe);
@@ -84,7 +82,6 @@ impl AudioEngine {
             save_trigger: Arc::new(tokio::sync::Notify::new()),
         })
     }
-
 
     /// Handle that callers nudge to request a debounced save. State spawns
     /// the consuming task in `set_engine` so the engine itself stays
@@ -137,11 +134,9 @@ impl AudioEngine {
         let channel = channels
             .get(&channel_id)
             .ok_or_else(|| anyhow::anyhow!("channel {channel_id} not opened"))?;
-        let mut plugin = self.formats.instantiate(
-            info,
-            self.sample_rate,
-            self.buffer_size,
-        )?;
+        let mut plugin = self
+            .formats
+            .instantiate(info, self.sample_rate, self.buffer_size)?;
         if let Some(blob) = state {
             if let Err(e) = plugin.load_state(blob) {
                 warn!(?e, plugin = %info.uri, "load_state failed; using defaults");
@@ -186,12 +181,7 @@ impl AudioEngine {
         Ok(())
     }
 
-    pub fn set_bypass(
-        &self,
-        channel_id: Uuid,
-        slot_id: Uuid,
-        bypass: bool,
-    ) -> anyhow::Result<()> {
+    pub fn set_bypass(&self, channel_id: Uuid, slot_id: Uuid, bypass: bool) -> anyhow::Result<()> {
         let channels = self.channels.lock();
         let channel = channels
             .get(&channel_id)
@@ -208,7 +198,6 @@ impl AudioEngine {
         channel.set_chain_bypass(bypass);
         Ok(())
     }
-
 
     pub fn set_lowcut(&self, channel_id: Uuid, enabled: bool) -> anyhow::Result<()> {
         let channels = self.channels.lock();
@@ -315,8 +304,7 @@ impl AudioEngine {
         // size right after the LV2 UI is instantiated (most LV2 UIs are
         // 800–1100px wide). 1280x800 keeps any UI we've seen on-screen even
         // before the resize fires.
-        let window = PluginWindow::open(title, 1280, 800)
-            .context("create plugin window")?;
+        let window = PluginWindow::open(title, 1280, 800).context("create plugin window")?;
         let parent = window.parent();
 
         let controller: Arc<dyn UiController> = Arc::new(EngineUiController {
@@ -330,7 +318,9 @@ impl AudioEngine {
             .get(&channel_id)
             .ok_or_else(|| anyhow::anyhow!("channel {channel_id} not opened"))?;
         let ui_result = channel
-            .with_slot_mut(slot_id, |slot| slot.plugin.show_ui(parent.clone(), controller.clone()))
+            .with_slot_mut(slot_id, |slot| {
+                slot.plugin.show_ui(parent, controller.clone())
+            })
             .ok_or_else(|| anyhow::anyhow!("slot {slot_id} not in channel {channel_id}"))?;
         drop(channels);
         let ui = ui_result.context("plugin show_ui failed")?;
@@ -427,7 +417,9 @@ pub fn spawn_ui_idle_pump(engine: Weak<AudioEngine>) {
         let mut tick = tokio::time::interval(Duration::from_millis(33));
         loop {
             tick.tick().await;
-            let Some(engine) = engine.upgrade() else { return };
+            let Some(engine) = engine.upgrade() else {
+                return;
+            };
             engine.tick_idle_uis();
         }
     });

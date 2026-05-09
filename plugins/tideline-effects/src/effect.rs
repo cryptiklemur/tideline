@@ -40,7 +40,9 @@ impl Default for ChannelEffectsData {
     }
 }
 
-fn default_input_gain() -> f32 { 1.0 }
+fn default_input_gain() -> f32 {
+    1.0
+}
 
 impl Effect {
     /// Convenience constructor for an LV2 effect with a fresh id, default name from URI.
@@ -85,6 +87,9 @@ mod tests {
 
     #[test]
     fn plugin_format_serializes_lowercase() {
-        assert_eq!(serde_json::to_string(&PluginFormat::Vst3).unwrap(), "\"vst3\"");
+        assert_eq!(
+            serde_json::to_string(&PluginFormat::Vst3).unwrap(),
+            "\"vst3\""
+        );
     }
 }

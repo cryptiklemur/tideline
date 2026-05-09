@@ -7,7 +7,8 @@ const FIXTURE_DIR: &str = "tests/fixtures";
 
 #[test]
 fn pipewire_conf_matches_golden() {
-    let input_json = fs::read_to_string(Path::new(FIXTURE_DIR).join("baseline_input.json")).unwrap();
+    let input_json =
+        fs::read_to_string(Path::new(FIXTURE_DIR).join("baseline_input.json")).unwrap();
     let cfg: AppConfig = serde_json::from_str(&input_json).unwrap();
     let actual = generate_pipewire_config(&cfg).unwrap();
     let expected = fs::read_to_string(Path::new(FIXTURE_DIR).join("baseline.conf")).unwrap();
@@ -17,7 +18,8 @@ fn pipewire_conf_matches_golden() {
 #[test]
 #[ignore]
 fn regenerate_golden() {
-    let input_json = fs::read_to_string(Path::new(FIXTURE_DIR).join("baseline_input.json")).unwrap();
+    let input_json =
+        fs::read_to_string(Path::new(FIXTURE_DIR).join("baseline_input.json")).unwrap();
     let cfg: AppConfig = serde_json::from_str(&input_json).unwrap();
     let actual = generate_pipewire_config(&cfg).unwrap();
     fs::write(Path::new(FIXTURE_DIR).join("baseline.conf"), actual).unwrap();

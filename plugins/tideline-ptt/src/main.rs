@@ -55,7 +55,7 @@ impl Plugin for PttPlugin {
             warn!(?e, "register_settings_section failed");
         }
 
-if let Err(e) = push_input_overlay(&host, &PluginConfig::default()).await {
+        if let Err(e) = push_input_overlay(&host, &PluginConfig::default()).await {
             warn!(?e, "register_input_overlay failed");
         }
 
@@ -63,7 +63,10 @@ if let Err(e) = push_input_overlay(&host, &PluginConfig::default()).await {
             Ok(v) => {
                 eprintln!("PTT: config loaded raw={}", v);
                 let cfg = PluginConfig::from_value(&v);
-                eprintln!("PTT: config parsed enabled_sources={:?} mode_by_source={:?}", cfg.enabled_sources, cfg.mode_by_source);
+                eprintln!(
+                    "PTT: config parsed enabled_sources={:?} mode_by_source={:?}",
+                    cfg.enabled_sources, cfg.mode_by_source
+                );
                 *self.runtime.config.lock().await = cfg.clone();
                 let mut state_map = self.runtime.state_by_source.lock().await;
                 state_map.clear();
@@ -116,10 +119,13 @@ if let Err(e) = push_input_overlay(&host, &PluginConfig::default()).await {
             let cfg = runtime.config.lock().await.clone();
             let err = runtime.error.lock().await.clone();
             let sources = host_for_tree.list_input_sources().await.unwrap_or_default();
-            if let Err(e) = host_for_tree.settings_section_render(
-                SECTION_ID,
-                ui::settings_section(&cfg, cm, err.as_deref(), &sources),
-            ).await {
+            if let Err(e) = host_for_tree
+                .settings_section_render(
+                    SECTION_ID,
+                    ui::settings_section(&cfg, cm, err.as_deref(), &sources),
+                )
+                .await
+            {
                 warn!(?e, "initial settings_section_render failed");
             }
             if let Err(e) = push_input_overlay(&host_for_tree, &cfg).await {
@@ -189,7 +195,11 @@ if let Err(e) = push_input_overlay(&host, &PluginConfig::default()).await {
 }
 
 impl PttPlugin {
-    async fn handle_render(&self, host: Arc<HostClient>, params: Option<Value>) -> Result<Value, RpcError> {
+    async fn handle_render(
+        &self,
+        host: Arc<HostClient>,
+        params: Option<Value>,
+    ) -> Result<Value, RpcError> {
         let section_id = params
             .as_ref()
             .and_then(|v| v.get("section_id"))

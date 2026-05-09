@@ -28,13 +28,28 @@ pub fn categorize(class: &str) -> Category {
     let c = class.to_ascii_lowercase();
     if c.contains("eq") || c.contains("equal") {
         Category::Eq
-    } else if c.contains("compress") || c.contains("dynamic") || c.contains("gate") || c.contains("limit") || c.contains("expander") {
+    } else if c.contains("compress")
+        || c.contains("dynamic")
+        || c.contains("gate")
+        || c.contains("limit")
+        || c.contains("expander")
+    {
         Category::Dynamics
     } else if c.contains("reverb") {
         Category::Reverb
-    } else if c.contains("delay") || c.contains("chorus") || c.contains("flange") || c.contains("phaser") || c.contains("modulator") {
+    } else if c.contains("delay")
+        || c.contains("chorus")
+        || c.contains("flange")
+        || c.contains("phaser")
+        || c.contains("modulator")
+    {
         Category::Modulation
-    } else if c.contains("util") || c.contains("amplif") || c.contains("filter") || c.contains("spectrum") || c.contains("analys") {
+    } else if c.contains("util")
+        || c.contains("amplif")
+        || c.contains("filter")
+        || c.contains("spectrum")
+        || c.contains("analys")
+    {
         Category::Utility
     } else {
         Category::Other
@@ -93,7 +108,10 @@ pub fn plugin_search_paths() -> Vec<(PluginFormat, PathBuf)> {
                     continue;
                 }
                 let path = PathBuf::from(p);
-                if !out.iter().any(|(f, existing)| *f == fmt && existing == &path) {
+                if !out
+                    .iter()
+                    .any(|(f, existing)| *f == fmt && existing == &path)
+                {
                     out.push((fmt, path));
                 }
             }
@@ -205,7 +223,10 @@ pub async fn ensure_cached(state: &EffectsState) -> PluginScanCache {
 pub async fn run_first_boot(state: Arc<EffectsState>) {
     let cache = if let Some(c) = load_cache() {
         if cache_is_fresh(&c) {
-            tracing::info!(count = c.plugins.len(), "effects plugin cache fresh, skipping scan");
+            tracing::info!(
+                count = c.plugins.len(),
+                "effects plugin cache fresh, skipping scan"
+            );
             c
         } else {
             tracing::info!("effects plugin cache stale, rescanning");

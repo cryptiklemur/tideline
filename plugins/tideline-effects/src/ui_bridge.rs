@@ -113,7 +113,9 @@ impl PluginWindow {
     /// embedded widget). Returns None on failure (window vanished etc).
     pub fn query_child_size(&self, child_window_id: u32) -> Option<(u16, u16)> {
         let cookie = self.conn.send_request(&xcb::x::GetGeometry {
-            drawable: xcb::x::Drawable::Window(<xcb::x::Window as xcb::XidNew>::new(child_window_id)),
+            drawable: xcb::x::Drawable::Window(<xcb::x::Window as xcb::XidNew>::new(
+                child_window_id,
+            )),
         });
         let reply = self.conn.wait_for_reply(cookie).ok()?;
         Some((reply.width(), reply.height()))

@@ -55,10 +55,7 @@ impl HostBackend for NullBackend {
     async fn list_input_sources(&self) -> Result<Vec<AudioSource>, String> {
         Ok(Vec::new())
     }
-    async fn config_namespace_get(
-        &self,
-        _namespace: &str,
-    ) -> Result<serde_json::Value, String> {
+    async fn config_namespace_get(&self, _namespace: &str) -> Result<serde_json::Value, String> {
         Ok(serde_json::Value::Null)
     }
     async fn config_namespace_set(

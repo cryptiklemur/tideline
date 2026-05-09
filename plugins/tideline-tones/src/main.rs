@@ -53,7 +53,13 @@ impl Plugin for TonesPlugin {
             error!(?e, "event_subscribe failed");
         }
         let cfg_now = self.cfg.lock().await.clone();
-        if let Err(e) = host.settings_section_render(SECTION_ID, serde_json::to_value(render(&cfg_now)).unwrap_or(serde_json::Value::Null)).await {
+        if let Err(e) = host
+            .settings_section_render(
+                SECTION_ID,
+                serde_json::to_value(render(&cfg_now)).unwrap_or(serde_json::Value::Null),
+            )
+            .await
+        {
             warn!(?e, "initial settings_section_render failed");
         }
         info!(plugin = PLUGIN_ID, "ready");
@@ -114,13 +120,19 @@ impl Plugin for TonesPlugin {
             {
                 Ok(c) => c,
                 Err(e) => {
-                    eprintln!("TONES: tone pipeline spawn failed tone={} err={:?}", tone_label, e);
+                    eprintln!(
+                        "TONES: tone pipeline spawn failed tone={} err={:?}",
+                        tone_label, e
+                    );
                     return;
                 }
             };
             if let Some(mut stdin) = child.stdin.take() {
                 if let Err(e) = stdin.write_all(wav).await {
-                    eprintln!("TONES: pipeline write failed tone={} err={:?}", tone_label, e);
+                    eprintln!(
+                        "TONES: pipeline write failed tone={} err={:?}",
+                        tone_label, e
+                    );
                     return;
                 }
                 drop(stdin);
@@ -135,7 +147,10 @@ impl Plugin for TonesPlugin {
                     );
                 }
                 Err(e) => {
-                    eprintln!("TONES: tone pipeline wait failed tone={} err={:?}", tone_label, e);
+                    eprintln!(
+                        "TONES: tone pipeline wait failed tone={} err={:?}",
+                        tone_label, e
+                    );
                 }
                 _ => {}
             }
@@ -203,7 +218,10 @@ impl Plugin for TonesPlugin {
                     }
                 }
                 if let Err(e) = host
-                    .settings_section_render(SECTION_ID, serde_json::to_value(render(&cfg_clone)).unwrap_or(Value::Null))
+                    .settings_section_render(
+                        SECTION_ID,
+                        serde_json::to_value(render(&cfg_clone)).unwrap_or(Value::Null),
+                    )
                     .await
                 {
                     error!(?e, "settings_section_render failed");

@@ -8,10 +8,26 @@ fn attach_detach_roundtrips_on_mix() {
     cfg.mixes.push(Mix::new("default", "Default"));
     let uuid = cfg.mixes[0].uuid.to_string();
 
-    handle_attach_data("io.tideline.silence", &uuid, "io.tideline.silence", json!({"k": 1}), &mut cfg).unwrap();
-    assert_eq!(cfg.mixes[0].plugin_data.get("io.tideline.silence"), Some(&json!({"k": 1})));
+    handle_attach_data(
+        "io.tideline.silence",
+        &uuid,
+        "io.tideline.silence",
+        json!({"k": 1}),
+        &mut cfg,
+    )
+    .unwrap();
+    assert_eq!(
+        cfg.mixes[0].plugin_data.get("io.tideline.silence"),
+        Some(&json!({"k": 1}))
+    );
 
-    handle_detach_data("io.tideline.silence", &uuid, "io.tideline.silence", &mut cfg).unwrap();
+    handle_detach_data(
+        "io.tideline.silence",
+        &uuid,
+        "io.tideline.silence",
+        &mut cfg,
+    )
+    .unwrap();
     assert!(!cfg.mixes[0].plugin_data.contains_key("io.tideline.silence"));
 }
 

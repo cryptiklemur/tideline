@@ -1,10 +1,14 @@
 use serde_json::json;
-use tideline_sdk::contribute::{PipewireContributeRequest, PipewireContributeResponse, SerializedAppConfig};
+use tideline_sdk::contribute::{
+    PipewireContributeRequest, PipewireContributeResponse, SerializedAppConfig,
+};
 
 #[test]
 fn request_roundtrips() {
     let req = PipewireContributeRequest {
-        config: SerializedAppConfig { json: json!({"channels": []}) },
+        config: SerializedAppConfig {
+            json: json!({"channels": []}),
+        },
         mix_mutes: vec![],
     };
     let s = serde_json::to_string(&req).unwrap();

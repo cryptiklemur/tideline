@@ -66,23 +66,42 @@ pub mod error_codes {
 
 impl Request {
     pub fn new(id: Id, method: impl Into<String>, params: Option<Value>) -> Self {
-        Self { jsonrpc: "2.0".into(), id, method: method.into(), params }
+        Self {
+            jsonrpc: "2.0".into(),
+            id,
+            method: method.into(),
+            params,
+        }
     }
 }
 
 impl Response {
     pub fn ok(id: Id, result: Value) -> Self {
-        Self { jsonrpc: "2.0".into(), id, result: Some(result), error: None }
+        Self {
+            jsonrpc: "2.0".into(),
+            id,
+            result: Some(result),
+            error: None,
+        }
     }
 
     pub fn err(id: Id, error: RpcError) -> Self {
-        Self { jsonrpc: "2.0".into(), id, result: None, error: Some(error) }
+        Self {
+            jsonrpc: "2.0".into(),
+            id,
+            result: None,
+            error: Some(error),
+        }
     }
 }
 
 impl Notification {
     pub fn new(method: impl Into<String>, params: Option<Value>) -> Self {
-        Self { jsonrpc: "2.0".into(), method: method.into(), params }
+        Self {
+            jsonrpc: "2.0".into(),
+            method: method.into(),
+            params,
+        }
     }
 }
 

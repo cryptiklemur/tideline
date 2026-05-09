@@ -41,7 +41,9 @@ extern "C" fn drop_message(
 fn silence_domain(domain: &str) {
     let Ok(c) = CString::new(domain) else { return };
     // -1 = G_LOG_LEVEL_MASK | G_LOG_FATAL_MASK (every level + fatal flag).
-    unsafe { g_log_set_handler(c.as_ptr(), -1, drop_message, std::ptr::null_mut()); }
+    unsafe {
+        g_log_set_handler(c.as_ptr(), -1, drop_message, std::ptr::null_mut());
+    }
 }
 
 /// Install handlers for the upstream libraries that spam stderr at startup.

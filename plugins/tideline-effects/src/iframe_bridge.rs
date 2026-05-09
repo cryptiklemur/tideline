@@ -114,20 +114,35 @@ async fn handle(
 ) -> Result<(), RpcError> {
     match msg {
         InboundMsg::Hello { channel_uuid } => {
-            send_to_iframe(host, surface_id, OutboundMsg::Hello {
-                plugin_version: env!("CARGO_PKG_VERSION").into(),
-            }).await?;
+            send_to_iframe(
+                host,
+                surface_id,
+                OutboundMsg::Hello {
+                    plugin_version: env!("CARGO_PKG_VERSION").into(),
+                },
+            )
+            .await?;
             let snap = snapshot_channel(state, channel_uuid).await;
-            send_to_iframe(host, surface_id, OutboundMsg::ChannelEffects {
-                channel_uuid,
-                data: snap,
-            }).await
+            send_to_iframe(
+                host,
+                surface_id,
+                OutboundMsg::ChannelEffects {
+                    channel_uuid,
+                    data: snap,
+                },
+            )
+            .await
         }
         InboundMsg::ListPlugins => {
             let plugins = state.catalog_clone().await;
             send_to_iframe(host, surface_id, OutboundMsg::PluginList { plugins }).await
         }
-        InboundMsg::AddEffect { channel_uuid, plugin_uri, format, display_name } => {
+        InboundMsg::AddEffect {
+            channel_uuid,
+            plugin_uri,
+            format,
+            display_name,
+        } => {
             let effect = Effect {
                 id: Uuid::new_v4(),
                 format,
@@ -136,29 +151,50 @@ async fn handle(
                 bypassed: false,
                 state_b64: None,
             };
-            crate::chain_ops::add_effect(state.clone(), channel_uuid, effect).await
+            crate::chain_ops::add_effect(state.clone(), channel_uuid, effect)
+                .await
                 .map_err(|e| internal(format!("add_effect: {e}")))?;
             persist_channel(state, host, channel_uuid).await
         }
-        InboundMsg::RemoveEffect { channel_uuid, effect_id } => {
-            crate::chain_ops::remove_effect(state.clone(), channel_uuid, effect_id).await
+        InboundMsg::RemoveEffect {
+            channel_uuid,
+            effect_id,
+        } => {
+            crate::chain_ops::remove_effect(state.clone(), channel_uuid, effect_id)
+                .await
                 .map_err(|e| internal(format!("remove_effect: {e}")))?;
             persist_channel(state, host, channel_uuid).await
         }
-        InboundMsg::ToggleBypass { channel_uuid, effect_id, bypassed } => {
-            state.set_effect_bypassed(channel_uuid, effect_id, bypassed).await;
+        InboundMsg::ToggleBypass {
+            channel_uuid,
+            effect_id,
+            bypassed,
+        } => {
+            state
+                .set_effect_bypassed(channel_uuid, effect_id, bypassed)
+                .await;
             persist_channel(state, host, channel_uuid).await
         }
-        InboundMsg::ToggleChainBypass { channel_uuid, bypassed } => {
+        InboundMsg::ToggleChainBypass {
+            channel_uuid,
+            bypassed,
+        } => {
             state.set_chain_bypass(channel_uuid, bypassed).await;
             persist_channel(state, host, channel_uuid).await
         }
-        InboundMsg::Reorder { channel_uuid, new_order } => {
-            crate::chain_ops::reorder_chain(state.clone(), channel_uuid, new_order).await
+        InboundMsg::Reorder {
+            channel_uuid,
+            new_order,
+        } => {
+            crate::chain_ops::reorder_chain(state.clone(), channel_uuid, new_order)
+                .await
                 .map_err(|e| internal(format!("reorder: {e}")))?;
             persist_channel(state, host, channel_uuid).await
         }
-        InboundMsg::OpenPluginGui { channel_uuid: _, effect_id: _ } => {
+        InboundMsg::OpenPluginGui {
+            channel_uuid: _,
+            effect_id: _,
+        } => {
             // Wired in Step 14 once ui_bridge + suil are available.
             Err(internal("plugin GUI not yet implemented".into()))
         }
@@ -176,7 +212,10 @@ async fn handle(
     }
 }
 
-pub(crate) async fn snapshot_channel(state: &Arc<EffectsState>, channel: Uuid) -> ChannelEffectsData {
+pub(crate) async fn snapshot_channel(
+    state: &Arc<EffectsState>,
+    channel: Uuid,
+) -> ChannelEffectsData {
     let order = state.chain_order(channel).await;
     let chain_bypassed = state.get_chain_bypass(channel).await;
     let lowcut = state.get_lowcut(channel).await;
@@ -189,7 +228,13 @@ pub(crate) async fn snapshot_channel(state: &Arc<EffectsState>, channel: Uuid) -
             effects.push(slot.effect.clone());
         }
     }
-    ChannelEffectsData { effects, chain_bypassed, lowcut, clipguard, input_gain }
+    ChannelEffectsData {
+        effects,
+        chain_bypassed,
+        lowcut,
+        clipguard,
+        input_gain,
+    }
 }
 
 pub(crate) async fn persist_channel(
@@ -198,9 +243,10 @@ pub(crate) async fn persist_channel(
     channel: Uuid,
 ) -> Result<(), RpcError> {
     let snap = snapshot_channel(state, channel).await;
-    let value = serde_json::to_value(&snap)
-        .map_err(|e| internal(format!("serialize snapshot: {e}")))?;
-    host.channel_attach_data(channel, value).await
+    let value =
+        serde_json::to_value(&snap).map_err(|e| internal(format!("serialize snapshot: {e}")))?;
+    host.channel_attach_data(channel, value)
+        .await
         .map_err(|e| internal(format!("channel.attach_data: {e}")))
 }
 
@@ -209,14 +255,19 @@ async fn send_to_iframe(
     surface_id: &str,
     msg: OutboundMsg,
 ) -> Result<(), RpcError> {
-    let value = serde_json::to_value(&msg)
-        .map_err(|e| internal(format!("serialize outbound: {e}")))?;
-    host.ui_iframe_send(surface_id, value).await
+    let value =
+        serde_json::to_value(&msg).map_err(|e| internal(format!("serialize outbound: {e}")))?;
+    host.ui_iframe_send(surface_id, value)
+        .await
         .map_err(|e| internal(format!("ui_iframe_send: {e}")))
 }
 
 fn internal(message: String) -> RpcError {
-    RpcError { code: error_codes::INTERNAL_ERROR, message, data: None }
+    RpcError {
+        code: error_codes::INTERNAL_ERROR,
+        message,
+        data: None,
+    }
 }
 
 #[cfg(test)]
@@ -235,7 +286,12 @@ mod tests {
         });
         let msg: InboundMsg = serde_json::from_value(raw).unwrap();
         match msg {
-            InboundMsg::AddEffect { channel_uuid, plugin_uri, format, display_name } => {
+            InboundMsg::AddEffect {
+                channel_uuid,
+                plugin_uri,
+                format,
+                display_name,
+            } => {
                 assert_eq!(channel_uuid, channel);
                 assert_eq!(plugin_uri, "http://lsp-plug.in/plugins/lv2/gate_mono");
                 assert_eq!(format, PluginFormat::Lv2);
@@ -252,7 +308,10 @@ mod tests {
             data: ChannelEffectsData::default(),
         };
         let v = serde_json::to_value(&msg).unwrap();
-        assert_eq!(v.get("kind").and_then(|x| x.as_str()), Some("channel_effects"));
+        assert_eq!(
+            v.get("kind").and_then(|x| x.as_str()),
+            Some("channel_effects")
+        );
         assert!(v.get("channel_uuid").is_some());
         assert!(v.get("data").is_some());
     }

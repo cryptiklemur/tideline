@@ -24,11 +24,7 @@ pub(crate) fn plugin_info_for(state: &EffectsState, effect: &Effect) -> Result<P
         .ok_or_else(|| anyhow::anyhow!("plugin {} not in catalog", effect.uri))
 }
 
-pub async fn add_effect(
-    state: Arc<EffectsState>,
-    channel_id: Uuid,
-    effect: Effect,
-) -> Result<()> {
+pub async fn add_effect(state: Arc<EffectsState>, channel_id: Uuid, effect: Effect) -> Result<()> {
     let engine = state
         .engine()
         .ok_or_else(|| anyhow::anyhow!("engine not initialized"))?;

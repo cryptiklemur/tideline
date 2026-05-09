@@ -162,19 +162,27 @@ impl PttRuntime {
             match config::save(host, self.namespace, &snapshot).await {
                 Ok(()) => eprintln!("PTT: config save OK source={} mode={:?}", source, mode),
                 Err(e) => {
-                    eprintln!("PTT: config save FAILED source={} mode={:?} err={:?}", source, mode, e);
+                    eprintln!(
+                        "PTT: config save FAILED source={} mode={:?} err={:?}",
+                        source, mode, e
+                    );
                     tracing::warn!(?e, "config save failed");
                 }
             }
         }
 
         let play_tone = fx.transmit_changed.map(|tx| if tx { "up" } else { "down" });
-        eprintln!("PTT: publishing state_changed source={} play_tone={:?} tx={:?}", source, play_tone, fx.transmit_changed);
+        eprintln!(
+            "PTT: publishing state_changed source={} play_tone={:?} tx={:?}",
+            source, play_tone, fx.transmit_changed
+        );
         self.publish_state_for(&source, play_tone).await;
     }
 
     async fn publish_state_for(&self, source: &str, play_tone: Option<&'static str>) {
-        let Some(host) = self.host() else { return; };
+        let Some(host) = self.host() else {
+            return;
+        };
         let s = {
             let map = self.state_by_source.lock().await;
             map.get(source).copied().unwrap_or_default()
@@ -230,7 +238,7 @@ impl PttRuntime {
         let states = self.state_by_source.lock().await.clone();
         for (source, st) in states {
             let muted = !st.transmitting();
-            if let Err(e) = mute::set_source_mute(&host, &source, muted).await {
+            if let Err(e) = mute::set_source_mute(host, &source, muted).await {
                 tracing::warn!(?e, source = %source, muted, "reapply mute failed");
             } else {
                 tracing::info!(source = %source, muted, "reapplied mute after pipewire restart");

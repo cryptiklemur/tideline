@@ -117,8 +117,6 @@ pub(crate) fn channel_card_tree(has_fx: bool) -> Value {
     })
 }
 
-
-
 pub(crate) fn settings_tree() -> Value {
     json!({
         "kind": "section",

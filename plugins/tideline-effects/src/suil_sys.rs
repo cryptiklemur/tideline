@@ -5,7 +5,12 @@
 //! file, in which case `pub use self::*` simply re-exports nothing. Callers
 //! must guard usage behind the `have_suil` cfg.
 
-#![allow(non_camel_case_types, non_snake_case, non_upper_case_globals, dead_code)]
+#![allow(
+    non_camel_case_types,
+    non_snake_case,
+    non_upper_case_globals,
+    dead_code
+)]
 
 include!(concat!(env!("OUT_DIR"), "/suil_sys.rs"));
 

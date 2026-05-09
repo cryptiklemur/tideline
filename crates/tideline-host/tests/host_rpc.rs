@@ -1,7 +1,7 @@
 mod common;
 
-use std::time::Duration;
 use serde_json::json;
+use std::time::Duration;
 use tideline_sdk::Capability::*;
 
 const HOST_METHODS: &[&str] = &[
@@ -43,11 +43,33 @@ async fn host_rpc_smoke_all_methods() {
     let reg = common::fresh_registry().await;
 
     for c in [
-        ChannelRead, ChannelWrite, ChannelSubscribe, ChannelCreate, ChannelAttachData,
-        MixAttachData, LevelsRead, AudioPlay, AudioMute, AudioBackendStatus, AudioPosition,
-        TrayContribute, UiIframe, UiChannelOverlay, KeybindRegister, PipewireContribute,
-        ConfigNamespaceRead, ConfigNamespaceWrite, ConfigRead, ConfigWrite,
-        FsRead, FsWrite, NetHttp, ProcessSpawn, SecretsRead, SecretsWrite, LogWrite,
+        ChannelRead,
+        ChannelWrite,
+        ChannelSubscribe,
+        ChannelCreate,
+        ChannelAttachData,
+        MixAttachData,
+        LevelsRead,
+        AudioPlay,
+        AudioMute,
+        AudioBackendStatus,
+        AudioPosition,
+        TrayContribute,
+        UiIframe,
+        UiChannelOverlay,
+        KeybindRegister,
+        PipewireContribute,
+        ConfigNamespaceRead,
+        ConfigNamespaceWrite,
+        ConfigRead,
+        ConfigWrite,
+        FsRead,
+        FsWrite,
+        NetHttp,
+        ProcessSpawn,
+        SecretsRead,
+        SecretsWrite,
+        LogWrite,
     ] {
         reg.grant_capability("io.tideline.test", c).await.unwrap();
     }
@@ -56,10 +78,14 @@ async fn host_rpc_smoke_all_methods() {
 
     let runtime = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
-            if let Some(rt) = reg.runtime("io.tideline.test").await { return rt; }
+            if let Some(rt) = reg.runtime("io.tideline.test").await {
+                return rt;
+            }
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
-    }).await.expect("plugin start");
+    })
+    .await
+    .expect("plugin start");
     let transport = runtime.transport().await.expect("transport");
 
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -69,7 +95,9 @@ async fn host_rpc_smoke_all_methods() {
         .await
         .expect("smoke_run");
 
-    let results = resp.get("results").and_then(|v| v.as_array())
+    let results = resp
+        .get("results")
+        .and_then(|v| v.as_array())
         .expect("results array");
 
     let mut failed: Vec<String> = Vec::new();

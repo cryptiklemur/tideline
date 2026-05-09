@@ -2,7 +2,7 @@
 //! by `RewireableTag` against tagged base directives; untagged `LoadModule`
 //! contributions append to the list.
 
-use super::directive::{ArgValue, PipewireDirective, RewireableTag, LoadModuleHeader};
+use super::directive::{ArgValue, LoadModuleHeader, PipewireDirective, RewireableTag};
 
 pub fn apply_contribution(
     base: Vec<PipewireDirective>,

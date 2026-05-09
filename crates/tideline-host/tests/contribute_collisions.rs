@@ -1,5 +1,5 @@
 use tideline_core::pipewire::directive::{LoadModuleHeader, PipewireDirective, RewireableTag};
-use tideline_host::contribute::{PluginContribution, PluginPriority, resolve_collisions};
+use tideline_host::contribute::{resolve_collisions, PluginContribution, PluginPriority};
 
 fn tag(uuid: &str) -> RewireableTag {
     RewireableTag {

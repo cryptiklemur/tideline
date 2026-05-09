@@ -1,9 +1,9 @@
+use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use serde_json::Value;
 use thiserror::Error;
-use tokio::sync::{broadcast, Mutex, mpsc};
+use tokio::sync::{broadcast, mpsc, Mutex};
 
 const RATE_WINDOW: Duration = Duration::from_secs(1);
 const RATE_MAX_EVENTS: usize = 200;
@@ -56,7 +56,9 @@ impl Default for EventBus {
 }
 
 impl EventBus {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     pub async fn register_plugin(
         &self,
@@ -65,14 +67,17 @@ impl EventBus {
     ) -> mpsc::Receiver<Event> {
         let (tx, rx) = mpsc::channel(CHANNEL_DEPTH);
         let mut inner = self.inner.lock().await;
-        inner.inboxes.insert(plugin_id.to_string(), PluginInbox {
-            sender: tx,
-            subscriptions: HashSet::new(),
-            declared_topics: declared_topics.into_iter().collect(),
-            rate_window_start: Instant::now(),
-            rate_count: 0,
-            drops: 0,
-        });
+        inner.inboxes.insert(
+            plugin_id.to_string(),
+            PluginInbox {
+                sender: tx,
+                subscriptions: HashSet::new(),
+                declared_topics: declared_topics.into_iter().collect(),
+                rate_window_start: Instant::now(),
+                rate_count: 0,
+                drops: 0,
+            },
+        );
         rx
     }
 
@@ -83,7 +88,9 @@ impl EventBus {
 
     pub async fn subscribe(&self, plugin_id: &str, topic: &str) -> Result<(), EventError> {
         let mut inner = self.inner.lock().await;
-        let inbox = inner.inboxes.get_mut(plugin_id)
+        let inbox = inner
+            .inboxes
+            .get_mut(plugin_id)
             .ok_or_else(|| EventError::PluginUnknown(plugin_id.into()))?;
         inbox.subscriptions.insert(topic.into());
         Ok(())
@@ -91,14 +98,19 @@ impl EventBus {
 
     pub async fn unsubscribe(&self, plugin_id: &str, topic: &str) -> Result<(), EventError> {
         let mut inner = self.inner.lock().await;
-        let inbox = inner.inboxes.get_mut(plugin_id)
+        let inbox = inner
+            .inboxes
+            .get_mut(plugin_id)
             .ok_or_else(|| EventError::PluginUnknown(plugin_id.into()))?;
         inbox.subscriptions.remove(topic);
         Ok(())
     }
 
     pub async fn publish_host(&self, topic: &str, params: Value) {
-        let event = Event { topic: topic.into(), params };
+        let event = Event {
+            topic: topic.into(),
+            params,
+        };
         self.fanout(event).await;
     }
 
@@ -114,7 +126,9 @@ impl EventBus {
     ) -> Result<(), EventError> {
         {
             let inner = self.inner.lock().await;
-            let inbox = inner.inboxes.get(plugin_id)
+            let inbox = inner
+                .inboxes
+                .get(plugin_id)
                 .ok_or_else(|| EventError::PluginUnknown(plugin_id.into()))?;
             if !inbox.declared_topics.contains(topic) {
                 return Err(EventError::TopicUndeclared {
@@ -123,7 +137,11 @@ impl EventBus {
                 });
             }
         }
-        self.fanout(Event { topic: topic.into(), params }).await;
+        self.fanout(Event {
+            topic: topic.into(),
+            params,
+        })
+        .await;
         Ok(())
     }
 
@@ -200,7 +218,10 @@ mod tests {
     async fn publish_plugin_rejects_undeclared_topic() {
         let bus = EventBus::new();
         let _rx = bus.register_plugin("a", vec!["a:done".into()]).await;
-        let err = bus.publish_plugin("a", "a:other", json!({})).await.unwrap_err();
+        let err = bus
+            .publish_plugin("a", "a:other", json!({}))
+            .await
+            .unwrap_err();
         assert!(matches!(err, EventError::TopicUndeclared { .. }));
         bus.publish_plugin("a", "a:done", json!({})).await.unwrap();
     }
@@ -214,7 +235,9 @@ mod tests {
             bus.publish_host("spam", json!({})).await;
         }
         let mut received = 0;
-        while rx.try_recv().is_ok() { received += 1; }
+        while rx.try_recv().is_ok() {
+            received += 1;
+        }
         assert!(received <= RATE_MAX_EVENTS, "got {received}");
         assert!(bus.drops_for("a").await >= 25);
     }

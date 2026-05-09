@@ -1,4 +1,6 @@
-use tideline_effects::discovery::{cache_is_fresh, load_cache, save_cache, CACHE_SCHEMA_VERSION, PluginScanCache};
+use tideline_effects::discovery::{
+    cache_is_fresh, load_cache, save_cache, PluginScanCache, CACHE_SCHEMA_VERSION,
+};
 
 #[test]
 fn save_and_load_cache_round_trips() {

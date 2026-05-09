@@ -35,13 +35,17 @@ fn parses_full_manifest() {
     assert_eq!(m.entry.exec, "tideline-test-plugin");
     assert_eq!(m.capabilities.required.len(), 2);
     assert_eq!(m.capabilities.optional.len(), 1);
-    assert_eq!(m.contributes.publishes_topics, vec!["io.tideline.test:smoketest_done"]);
+    assert_eq!(
+        m.contributes.publishes_topics,
+        vec!["io.tideline.test:smoketest_done"]
+    );
     assert_eq!(m.contributes.channel_overlays[0].slot, "footer");
 }
 
 #[test]
 fn rejects_missing_required_section() {
-    let bad = "[plugin]\nschema = 1\nid = \"x\"\nname = \"x\"\nversion = \"0.1.0\"\npublisher = \"x\"\n";
+    let bad =
+        "[plugin]\nschema = 1\nid = \"x\"\nname = \"x\"\nversion = \"0.1.0\"\npublisher = \"x\"\n";
     let err = toml::from_str::<Manifest>(bad);
     assert!(err.is_err(), "manifest without [host] should fail");
 }

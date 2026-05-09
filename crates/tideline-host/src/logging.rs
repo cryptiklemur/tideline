@@ -17,16 +17,13 @@ impl PluginLog {
             .append(true)
             .open(path)
             .await?;
-        Ok(Self { file: Mutex::new(file) })
+        Ok(Self {
+            file: Mutex::new(file),
+        })
     }
 
     pub async fn append_line(&self, level: &str, msg: &str) -> std::io::Result<()> {
-        let line = format!(
-            "{} {} {}\n",
-            now_rfc3339(),
-            level,
-            msg
-        );
+        let line = format!("{} {} {}\n", now_rfc3339(), level, msg);
         let mut f = self.file.lock().await;
         f.write_all(line.as_bytes()).await?;
         f.flush().await
@@ -35,7 +32,9 @@ impl PluginLog {
 
 fn now_rfc3339() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
-    let d = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+    let d = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
     format!("{}.{:09}", d.as_secs(), d.subsec_nanos())
 }
 

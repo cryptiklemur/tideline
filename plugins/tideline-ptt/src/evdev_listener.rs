@@ -307,7 +307,12 @@ fn handle_key_event(shared: &Shared, k: KeyCode, value: i32) {
     let captured_value = value;
     shared.handle.spawn(async move {
         let cfg = runtime.config.lock().await.clone();
-        eprintln!("PTT: evdev key event observed={:?} value={} enabled_sources={}", observed, captured_value, cfg.enabled_sources.len());
+        eprintln!(
+            "PTT: evdev key event observed={:?} value={} enabled_sources={}",
+            observed,
+            captured_value,
+            cfg.enabled_sources.len()
+        );
         let toggle = cfg.mode_toggle_binding.clone();
         let hold = cfg.hold_binding.clone();
         let sources = cfg.enabled_sources.clone();

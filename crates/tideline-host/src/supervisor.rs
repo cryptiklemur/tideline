@@ -43,7 +43,10 @@ mod tests {
     fn first_crash_restarts_after_backoff() {
         let mut t = CrashTracker::default();
         let now = Instant::now();
-        assert_eq!(t.record(now, -1), CrashDecision::RestartAfter(RESTART_BACKOFF));
+        assert_eq!(
+            t.record(now, -1),
+            CrashDecision::RestartAfter(RESTART_BACKOFF)
+        );
     }
 
     #[test]

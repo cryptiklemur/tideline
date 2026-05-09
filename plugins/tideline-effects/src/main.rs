@@ -1,22 +1,21 @@
 mod audition;
 mod chain_ops;
+mod discovery;
 #[allow(dead_code)]
 mod effect;
-mod state;
-mod discovery;
 mod engine;
 mod host;
-mod pipewire_contributor;
 mod iframe_bridge;
+mod namespace_config;
 mod overlay_render;
-mod rack;
 #[allow(dead_code)]
 mod persist;
-mod namespace_config;
+mod pipewire_contributor;
+mod rack;
+mod state;
 #[allow(dead_code)]
 mod util;
 
-#[allow(dead_code)]
 mod suil_sys;
 #[allow(dead_code)]
 mod ui_bridge;
@@ -137,12 +136,10 @@ impl Plugin for EffectsPlugin {
         if engine_ready {
             let mut persisted_any = false;
             for channel in self.state.channels_with_effects().await {
-                match crate::iframe_bridge::persist_channel(
-                    &self.state,
-                    &host,
-                    channel,
-                ).await {
-                    Ok(_) => { persisted_any = true; }
+                match crate::iframe_bridge::persist_channel(&self.state, &host, channel).await {
+                    Ok(_) => {
+                        persisted_any = true;
+                    }
                     Err(e) => warn!(?e, %channel, "startup persist_channel failed"),
                 }
             }
@@ -159,10 +156,7 @@ impl Plugin for EffectsPlugin {
             }
         }
 
-        for topic in &[
-            "host:channel_removed",
-            "host:pipewire_restarted",
-        ] {
+        for topic in &["host:channel_removed", "host:pipewire_restarted"] {
             if let Err(e) = host.event_subscribe(topic).await {
                 warn!(?e, topic, "event_subscribe failed");
             }
@@ -236,7 +230,8 @@ impl Plugin for EffectsPlugin {
                     message: "missing params".into(),
                     data: None,
                 })?;
-                let channel_uuid = req.get("channel_uuid")
+                let channel_uuid = req
+                    .get("channel_uuid")
                     .and_then(|v| v.as_str())
                     .and_then(|s| uuid::Uuid::parse_str(s).ok())
                     .ok_or_else(|| RpcError {
@@ -244,7 +239,10 @@ impl Plugin for EffectsPlugin {
                         message: "channel_uuid required".into(),
                         data: None,
                     })?;
-                let enabled = req.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
+                let enabled = req
+                    .get("enabled")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
                 self.state.set_lowcut(channel_uuid, enabled).await;
                 Ok(serde_json::json!({ "ok": true, "enabled": enabled }))
             }
@@ -254,7 +252,8 @@ impl Plugin for EffectsPlugin {
                     message: "missing params".into(),
                     data: None,
                 })?;
-                let channel_uuid = req.get("channel_uuid")
+                let channel_uuid = req
+                    .get("channel_uuid")
                     .and_then(|v| v.as_str())
                     .and_then(|s| uuid::Uuid::parse_str(s).ok())
                     .ok_or_else(|| RpcError {
@@ -262,7 +261,10 @@ impl Plugin for EffectsPlugin {
                         message: "channel_uuid required".into(),
                         data: None,
                     })?;
-                let enabled = req.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
+                let enabled = req
+                    .get("enabled")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
                 self.state.set_clipguard(channel_uuid, enabled).await;
                 Ok(serde_json::json!({ "ok": true, "enabled": enabled }))
             }
@@ -272,7 +274,8 @@ impl Plugin for EffectsPlugin {
                     message: "missing params".into(),
                     data: None,
                 })?;
-                let channel_uuid = req.get("channel_uuid")
+                let channel_uuid = req
+                    .get("channel_uuid")
                     .and_then(|v| v.as_str())
                     .and_then(|s| uuid::Uuid::parse_str(s).ok())
                     .ok_or_else(|| RpcError {
@@ -290,7 +293,8 @@ impl Plugin for EffectsPlugin {
                     message: "missing params".into(),
                     data: None,
                 })?;
-                let channel_uuid = req.get("channel_uuid")
+                let channel_uuid = req
+                    .get("channel_uuid")
                     .and_then(|v| v.as_str())
                     .and_then(|s| uuid::Uuid::parse_str(s).ok())
                     .ok_or_else(|| RpcError {
@@ -331,12 +335,8 @@ impl Plugin for EffectsPlugin {
             "effects.audition_loop_resume" => {
                 audition::handle_loop_resume(&self.state, host, params).await
             }
-            "effects.audition_state" => {
-                audition::handle_status(&self.state, host, params).await
-            }
-            "effects.audition_discard" => {
-                audition::handle_discard(&self.state, host, params).await
-            }
+            "effects.audition_state" => audition::handle_status(&self.state, host, params).await,
+            "effects.audition_discard" => audition::handle_discard(&self.state, host, params).await,
             other => Err(RpcError {
                 code: error_codes::METHOD_NOT_FOUND,
                 message: format!("unknown method {other}"),
@@ -345,9 +345,11 @@ impl Plugin for EffectsPlugin {
         }
     }
 
-   async fn on_event(&self, _host: Arc<HostClient>, topic: String, params: Value) {
+    async fn on_event(&self, _host: Arc<HostClient>, topic: String, params: Value) {
         match topic.as_str() {
-            "host:channel_removed" => state::on_channel_removed(self.state.clone(), Some(params)).await,
+            "host:channel_removed" => {
+                state::on_channel_removed(self.state.clone(), Some(params)).await
+            }
             "host:pipewire_restarted" => {
                 tracing::info!("pipewire restarted — recreating engine channels");
                 state::recreate_engine_from_state(self.state.clone()).await;

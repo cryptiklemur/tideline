@@ -61,11 +61,14 @@ pub async fn tideline_plugin_request<R: Runtime>(
 ) -> Result<serde_json::Value, String> {
     let registry = app.state::<Arc<PluginRegistry>>();
     registry
-        .send_request(&plugin_id, &method, params.unwrap_or(serde_json::Value::Null))
+        .send_request(
+            &plugin_id,
+            &method,
+            params.unwrap_or(serde_json::Value::Null),
+        )
         .await
         .map_err(|e| e.to_string())
 }
-
 
 #[tauri::command]
 pub async fn tideline_plugin_replay_states<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
@@ -111,7 +114,6 @@ pub fn spawn_contributions_relay<R: Runtime>(app: &AppHandle<R>, registry: Arc<P
         }
     });
 }
-
 
 pub fn spawn_plugin_events_relay<R: Runtime>(app: &AppHandle<R>, registry: Arc<PluginRegistry>) {
     let mut rx = registry.subscribe_plugin_events();

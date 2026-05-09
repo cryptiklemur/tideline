@@ -10,7 +10,8 @@ fn cfg_with_one_mix_and_output_channel() -> AppConfig {
     let mut mix = tideline_core::model::Mix::new("default", "Default");
     mix.sinks.push("alsa_output.real_sink_a".into());
     cfg.mixes.push(mix);
-    cfg.channels.push(tideline_core::model::ChannelCfg::new("Game"));
+    cfg.channels
+        .push(tideline_core::model::ChannelCfg::new("Game"));
     cfg
 }
 
@@ -36,7 +37,10 @@ fn loopbacks_carry_rewireable_tag_when_eligible() {
         PipewireDirective::LoadModule { rewireable_tag, .. } => rewireable_tag.is_some(),
         _ => false,
     });
-    assert!(tagged, "channel loopback must be tagged for rewire eligibility");
+    assert!(
+        tagged,
+        "channel loopback must be tagged for rewire eligibility"
+    );
 }
 
 #[test]

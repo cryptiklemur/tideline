@@ -1,9 +1,9 @@
-use std::sync::Arc;
-use std::time::Duration;
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use tideline_sdk::{HostClient, Plugin, run};
-use tideline_sdk::rpc::{RpcError, error_codes};
+use std::sync::Arc;
+use std::time::Duration;
+use tideline_sdk::rpc::{error_codes, RpcError};
+use tideline_sdk::{run, HostClient, Plugin};
 use tokio::sync::Mutex;
 
 const HOST_METHODS: &[&str] = &[
@@ -52,14 +52,15 @@ impl Plugin for TestPlugin {
         let _ = host.event_subscribe("host:channel.changed").await;
         let _ = host.notify("Test Plugin", "ready").await;
         let _ = host.channel_list().await;
-        let _ = host.event_publish(
-            "io.tideline.test:smoketest_done",
-            json!({"ok": true}),
-        ).await;
+        let _ = host
+            .event_publish("io.tideline.test:smoketest_done", json!({"ok": true}))
+            .await;
     }
 
     async fn on_event(&self, host: Arc<HostClient>, topic: String, params: Value) {
-        let _ = host.log_write("info", &format!("event {topic}: {params}")).await;
+        let _ = host
+            .log_write("info", &format!("event {topic}: {params}"))
+            .await;
     }
 
     async fn on_notification(&self, _host: Arc<HostClient>, method: String, params: Option<Value>) {
@@ -70,9 +71,12 @@ impl Plugin for TestPlugin {
         }
     }
 
-    async fn on_request(&self, host: Arc<HostClient>, method: String, params: Option<Value>)
-        -> Result<Value, RpcError>
-    {
+    async fn on_request(
+        &self,
+        host: Arc<HostClient>,
+        method: String,
+        params: Option<Value>,
+    ) -> Result<Value, RpcError> {
         match method.as_str() {
             "plugin/iframe.message" => {
                 if let Some(obj) = params.as_ref().and_then(|v| v.as_object()) {
@@ -104,9 +108,16 @@ impl Plugin for TestPlugin {
             }
             "plugin/call_one" => {
                 let p = params.unwrap_or(json!({}));
-                let method = p.get("method").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let method = p
+                    .get("method")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 let call_params = p.get("params").cloned();
-                match host.call_raw(&method, call_params, Duration::from_secs(2)).await {
+                match host
+                    .call_raw(&method, call_params, Duration::from_secs(2))
+                    .await
+                {
                     Ok(value) => Ok(json!({"ok": true, "value": value})),
                     Err(tideline_sdk::transport::SdkTransportError::Rpc(rpc_err)) => Ok(json!({
                         "ok": false,

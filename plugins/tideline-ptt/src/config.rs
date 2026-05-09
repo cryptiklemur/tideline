@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use tideline_sdk::transport::SdkTransportError;
 use tideline_sdk::HostClient;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct PluginConfig {
     #[serde(default)]
     pub mode_toggle_binding: Option<Binding>,
@@ -15,17 +15,6 @@ pub struct PluginConfig {
     pub enabled_sources: Vec<String>,
     #[serde(default)]
     pub mode_by_source: HashMap<String, Mode>,
-}
-
-impl Default for PluginConfig {
-    fn default() -> Self {
-        Self {
-            mode_toggle_binding: None,
-            hold_binding: None,
-            enabled_sources: Vec::new(),
-            mode_by_source: HashMap::new(),
-        }
-    }
 }
 
 impl PluginConfig {
@@ -56,7 +45,10 @@ impl PluginConfig {
     }
 
     pub fn mode_for(&self, source: &str) -> Mode {
-        self.mode_by_source.get(source).copied().unwrap_or(Mode::Open)
+        self.mode_by_source
+            .get(source)
+            .copied()
+            .unwrap_or(Mode::Open)
     }
 }
 

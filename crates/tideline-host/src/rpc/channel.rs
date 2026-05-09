@@ -22,8 +22,11 @@ pub fn handle_attach_data(
     if caller_plugin_id != namespace {
         return Err(ChannelRpcError::Forbidden(namespace.into()));
     }
-    let uuid = Uuid::parse_str(channel_uuid).map_err(|_| ChannelRpcError::BadUuid(channel_uuid.into()))?;
-    let ch = cfg.channel_by_uuid_mut(uuid).ok_or_else(|| ChannelRpcError::NotFound(channel_uuid.into()))?;
+    let uuid =
+        Uuid::parse_str(channel_uuid).map_err(|_| ChannelRpcError::BadUuid(channel_uuid.into()))?;
+    let ch = cfg
+        .channel_by_uuid_mut(uuid)
+        .ok_or_else(|| ChannelRpcError::NotFound(channel_uuid.into()))?;
     ch.plugin_data.insert(namespace.into(), value);
     Ok(())
 }
@@ -37,8 +40,11 @@ pub fn handle_detach_data(
     if caller_plugin_id != namespace {
         return Err(ChannelRpcError::Forbidden(namespace.into()));
     }
-    let uuid = Uuid::parse_str(channel_uuid).map_err(|_| ChannelRpcError::BadUuid(channel_uuid.into()))?;
-    let ch = cfg.channel_by_uuid_mut(uuid).ok_or_else(|| ChannelRpcError::NotFound(channel_uuid.into()))?;
+    let uuid =
+        Uuid::parse_str(channel_uuid).map_err(|_| ChannelRpcError::BadUuid(channel_uuid.into()))?;
+    let ch = cfg
+        .channel_by_uuid_mut(uuid)
+        .ok_or_else(|| ChannelRpcError::NotFound(channel_uuid.into()))?;
     ch.plugin_data.remove(namespace);
     Ok(())
 }

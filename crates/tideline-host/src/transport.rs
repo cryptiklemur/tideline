@@ -1,13 +1,13 @@
+use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
-use serde_json::Value;
 use thiserror::Error;
-use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::sync::{Mutex, mpsc, oneshot};
-use tokio::task::JoinHandle;
 use tideline_sdk::framing::{read_frame, write_frame};
 use tideline_sdk::rpc::{Id, Message, Notification, Request, Response, RpcError};
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::task::JoinHandle;
 
 #[derive(Debug, Error)]
 pub enum TransportError {
@@ -79,14 +79,16 @@ impl JsonRpcTransport {
                             if let Ok(resp) = rx.await {
                                 let _ = out_tx.send(Message::Response(resp)).await;
                             } else {
-                                let _ = out_tx.send(Message::Response(Response::err(
-                                    id,
-                                    RpcError {
-                                        code: tideline_sdk::rpc::error_codes::INTERNAL_ERROR,
-                                        message: "handler dropped".into(),
-                                        data: None,
-                                    },
-                                ))).await;
+                                let _ = out_tx
+                                    .send(Message::Response(Response::err(
+                                        id,
+                                        RpcError {
+                                            code: tideline_sdk::rpc::error_codes::INTERNAL_ERROR,
+                                            message: "handler dropped".into(),
+                                            data: None,
+                                        },
+                                    )))
+                                    .await;
                             }
                         });
                     }
@@ -131,16 +133,27 @@ impl JsonRpcTransport {
     }
 
     pub async fn take_requests(&self) -> mpsc::Receiver<IncomingRequest> {
-        self.requests_rx.lock().await.take().expect("requests already taken")
+        self.requests_rx
+            .lock()
+            .await
+            .take()
+            .expect("requests already taken")
     }
 
     pub async fn take_notifications(&self) -> mpsc::Receiver<Notification> {
-        self.notifications_rx.lock().await.take().expect("notes already taken")
+        self.notifications_rx
+            .lock()
+            .await
+            .take()
+            .expect("notes already taken")
     }
 
-    pub async fn call(&self, method: &str, params: Option<Value>, timeout: Duration)
-        -> Result<Value, TransportError>
-    {
+    pub async fn call(
+        &self,
+        method: &str,
+        params: Option<Value>,
+        timeout: Duration,
+    ) -> Result<Value, TransportError> {
         let id = {
             let mut n = self.next_id.lock().await;
             let id = *n;
@@ -150,10 +163,15 @@ impl JsonRpcTransport {
         let (tx, rx) = oneshot::channel();
         self.pending.lock().await.insert(id.clone(), tx);
         let req = Request::new(id.clone(), method, params);
-        self.outbound.send(Message::Request(req)).await.map_err(|_| TransportError::Closed)?;
+        self.outbound
+            .send(Message::Request(req))
+            .await
+            .map_err(|_| TransportError::Closed)?;
         match tokio::time::timeout(timeout, rx).await {
             Ok(Ok(resp)) => {
-                if let Some(err) = resp.error { return Err(TransportError::Rpc(err)); }
+                if let Some(err) = resp.error {
+                    return Err(TransportError::Rpc(err));
+                }
                 Ok(resp.result.unwrap_or(Value::Null))
             }
             Ok(Err(_)) => Err(TransportError::Closed),
@@ -172,8 +190,12 @@ impl JsonRpcTransport {
     }
 
     pub async fn shutdown(&self) {
-        if let Some(h) = self.writer_handle.lock().await.take() { h.abort(); }
-        if let Some(h) = self.reader_handle.lock().await.take() { h.abort(); }
+        if let Some(h) = self.writer_handle.lock().await.take() {
+            h.abort();
+        }
+        if let Some(h) = self.reader_handle.lock().await.take() {
+            h.abort();
+        }
     }
 }
 
@@ -197,7 +219,10 @@ mod tests {
             }
         });
 
-        let val = host.call("host/initialize", Some(json!({})), Duration::from_secs(2)).await.unwrap();
+        let val = host
+            .call("host/initialize", Some(json!({})), Duration::from_secs(2))
+            .await
+            .unwrap();
         assert_eq!(val, json!({"echo":"host/initialize"}));
     }
 
@@ -206,7 +231,10 @@ mod tests {
         let (host_r, _plugin_w) = duplex(8192);
         let (_plugin_r, host_w) = duplex(8192);
         let host = JsonRpcTransport::spawn(host_r, host_w);
-        let err = host.call("host/anything", None, Duration::from_millis(50)).await.unwrap_err();
+        let err = host
+            .call("host/anything", None, Duration::from_millis(50))
+            .await
+            .unwrap_err();
         assert!(matches!(err, TransportError::Timeout));
     }
 }

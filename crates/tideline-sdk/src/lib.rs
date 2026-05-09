@@ -2,19 +2,19 @@
 //!
 //! Re-exports framing, rpc, types, transport, client, and plugin trait for plugin authors.
 
-pub mod types;
-pub mod rpc;
-pub mod framing;
-pub mod transport;
 pub mod client;
-pub mod plugin;
 pub mod contribute;
-pub mod ui;
+pub mod framing;
 pub mod logging;
+pub mod plugin;
+pub mod rpc;
+pub mod transport;
+pub mod types;
+pub mod ui;
 
-pub use types::Capability;
-pub use plugin::{Plugin, run};
 pub use client::HostClient;
+pub use plugin::{run, Plugin};
+pub use types::Capability;
 
 #[cfg(test)]
 mod tests {

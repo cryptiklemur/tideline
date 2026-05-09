@@ -3,8 +3,7 @@ use std::sync::Arc;
 use tideline_host::PluginRegistry;
 
 pub fn fixture_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/tideline-test-plugin")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/tideline-test-plugin")
 }
 
 pub async fn fresh_registry() -> Arc<PluginRegistry> {
@@ -26,12 +25,14 @@ pub async fn fresh_registry() -> Arc<PluginRegistry> {
     std::fs::copy(
         fixture_dir().join("tideline-plugin.toml"),
         dest_dir.join("tideline-plugin.toml"),
-    ).unwrap();
+    )
+    .unwrap();
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let mut perms = std::fs::metadata(dest_dir.join("tideline-test-plugin"))
-            .unwrap().permissions();
+            .unwrap()
+            .permissions();
         perms.set_mode(0o755);
         std::fs::set_permissions(dest_dir.join("tideline-test-plugin"), perms).unwrap();
     }

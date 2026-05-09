@@ -1,16 +1,18 @@
-use std::path::{Path, PathBuf};
-use thiserror::Error;
-use tideline_sdk::Capability;
-use tideline_sdk::types::Manifest;
 use crate::manifest::{self, ManifestError};
 use crate::paths::plugin_install_dir;
+use std::path::{Path, PathBuf};
+use thiserror::Error;
+use tideline_sdk::types::Manifest;
+use tideline_sdk::Capability;
 
 const MANIFEST_FILENAME: &str = "tideline-plugin.toml";
 
 #[derive(Debug, Error)]
 pub enum InstallError {
-    #[error("io: {0}")] Io(#[from] std::io::Error),
-    #[error("manifest: {0}")] Manifest(#[from] ManifestError),
+    #[error("io: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("manifest: {0}")]
+    Manifest(#[from] ManifestError),
     #[error("granted capability {0:?} is not in declared (required + optional)")]
     GrantedNotDeclared(Capability),
     #[error("required capability {0:?} is missing from grant")]
@@ -43,9 +45,14 @@ pub fn inspect(source: &Path) -> Result<InstallPreview, InstallError> {
     })
 }
 
-pub fn commit_install(preview: &InstallPreview, granted: &[Capability]) -> Result<PathBuf, InstallError> {
+pub fn commit_install(
+    preview: &InstallPreview,
+    granted: &[Capability],
+) -> Result<PathBuf, InstallError> {
     let declared: std::collections::HashSet<Capability> = preview
-        .declared_required.iter().copied()
+        .declared_required
+        .iter()
+        .copied()
         .chain(preview.declared_optional.iter().copied())
         .collect();
     for g in granted {
@@ -60,7 +67,9 @@ pub fn commit_install(preview: &InstallPreview, granted: &[Capability]) -> Resul
     }
 
     let dest = plugin_install_dir(&preview.manifest.plugin.id);
-    if dest.exists() { std::fs::remove_dir_all(&dest)?; }
+    if dest.exists() {
+        std::fs::remove_dir_all(&dest)?;
+    }
     std::fs::create_dir_all(&dest)?;
     copy_dir(&preview.source, &dest)?;
     Ok(dest)

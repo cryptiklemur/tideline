@@ -198,7 +198,12 @@ mod tests {
 
         for (variant, expected_wire) in cases {
             let json = serde_json::to_string(variant).unwrap();
-            assert_eq!(json, format!("\"{}\"", expected_wire), "serialize mismatch for {:?}", variant);
+            assert_eq!(
+                json,
+                format!("\"{}\"", expected_wire),
+                "serialize mismatch for {:?}",
+                variant
+            );
             let back: Capability = serde_json::from_str(&json).unwrap();
             assert_eq!(back, *variant, "round-trip mismatch for {:?}", variant);
         }
@@ -235,6 +240,9 @@ mod permissions_tests {
         let s = toml::to_string(&file).unwrap();
         let back: PermissionsFile = toml::from_str(&s).unwrap();
         assert_eq!(back.plugin_id, "io.tideline.test");
-        assert_eq!(back.granted, vec![Capability::ChannelRead, Capability::EventsPublish]);
+        assert_eq!(
+            back.granted,
+            vec![Capability::ChannelRead, Capability::EventsPublish]
+        );
     }
 }

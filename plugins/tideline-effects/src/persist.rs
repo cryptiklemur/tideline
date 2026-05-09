@@ -37,7 +37,9 @@ impl Default for PersistedChannel {
     }
 }
 
-fn default_input_gain() -> f32 { 1.0 }
+fn default_input_gain() -> f32 {
+    1.0
+}
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct PersistedChains {
@@ -166,11 +168,7 @@ pub async fn refresh_state_and_save(state: Arc<EffectsState>) {
             }
         }
     }
-    let in_mem: usize = state
-        .effects
-        .lock()
-        .await
-        .len();
+    let in_mem: usize = state.effects.lock().await.len();
     let on_disk: usize = load_chains_from_disk()
         .channels
         .values()

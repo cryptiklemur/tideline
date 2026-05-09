@@ -3,7 +3,9 @@ use serde_json::Value;
 use std::collections::HashMap;
 use uuid::Uuid;
 
-fn fresh_uuid() -> Uuid { Uuid::new_v4() }
+fn fresh_uuid() -> Uuid {
+    Uuid::new_v4()
+}
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -81,10 +83,19 @@ impl ChannelCfg {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum KeybindAction {
-    ToggleOutputMute { sink: String },
-    ToggleChannelMute { channel: String },
-    ToggleMixEnabled { mix_id: String },
-    Plugin { plugin_id: String, action_id: String },
+    ToggleOutputMute {
+        sink: String,
+    },
+    ToggleChannelMute {
+        channel: String,
+    },
+    ToggleMixEnabled {
+        mix_id: String,
+    },
+    Plugin {
+        plugin_id: String,
+        action_id: String,
+    },
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

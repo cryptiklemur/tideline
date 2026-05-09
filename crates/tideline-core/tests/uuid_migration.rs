@@ -27,7 +27,10 @@ fn legacy_config_without_uuid_deserializes_with_fresh_uuids() {
     }"#;
     let cfg: AppConfig = serde_json::from_str(json).unwrap();
     assert_eq!(cfg.channels.len(), 1);
-    assert!(!cfg.channels[0].uuid.is_nil(), "uuid must be assigned on migration");
+    assert!(
+        !cfg.channels[0].uuid.is_nil(),
+        "uuid must be assigned on migration"
+    );
     assert!(cfg.channels[0].plugin_data.is_empty());
     assert!(!cfg.mixes[0].uuid.is_nil());
     assert!(cfg.mixes[0].plugin_data.is_empty());

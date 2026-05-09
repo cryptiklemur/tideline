@@ -43,7 +43,10 @@ fn apply_once(app: &AppHandle) {
             None => continue,
         };
         let cur_sink_idx = input["sink"].as_u64().unwrap_or(u64::MAX);
-        let cur_sink_name = sink_idx_name.get(&cur_sink_idx).cloned().unwrap_or_default();
+        let cur_sink_name = sink_idx_name
+            .get(&cur_sink_idx)
+            .cloned()
+            .unwrap_or_default();
 
         let bin = match client_bin.get(&client_idx) {
             Some(b) => b,

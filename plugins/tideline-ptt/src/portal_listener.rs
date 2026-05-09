@@ -115,21 +115,22 @@ pub async fn try_start(runtime: Arc<PttRuntime>) -> Result<(), String> {
         }
         opts
     };
-    let mut shortcuts: Vec<(String, HashMap<&str, Value<'_>>)> = Vec::new();
-    shortcuts.push((
-        SHORTCUT_TOGGLE.to_string(),
-        make_opts(
-            "Toggle PTT mode (open mic / push-to-talk) — all enabled inputs".to_string(),
-            global_toggle_trigger.clone(),
+    let shortcuts: Vec<(String, HashMap<&str, Value<'_>>)> = vec![
+        (
+            SHORTCUT_TOGGLE.to_string(),
+            make_opts(
+                "Toggle PTT mode (open mic / push-to-talk) — all enabled inputs".to_string(),
+                global_toggle_trigger.clone(),
+            ),
         ),
-    ));
-    shortcuts.push((
-        SHORTCUT_HOLD.to_string(),
-        make_opts(
-            "Hold to transmit — all enabled inputs".to_string(),
-            global_hold_trigger.clone(),
+        (
+            SHORTCUT_HOLD.to_string(),
+            make_opts(
+                "Hold to transmit — all enabled inputs".to_string(),
+                global_hold_trigger.clone(),
+            ),
         ),
-    ));
+    ];
     let shortcuts_ref: Vec<(&str, HashMap<&str, Value<'_>>)> = shortcuts
         .iter()
         .map(|(id, opts)| (id.as_str(), opts.clone()))

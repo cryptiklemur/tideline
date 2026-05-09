@@ -1,20 +1,25 @@
+use crate::framing::read_frame;
+use crate::rpc::{error_codes, Id, Message, Notification, Request, Response, RpcError};
+use serde_json::Value;
 use std::sync::Arc;
 use std::time::Duration;
-use serde_json::Value;
 use tokio::io::stdin;
-use tokio::sync::{Mutex, mpsc, oneshot};
-use crate::framing::read_frame;
-use crate::rpc::{Id, Message, Notification, Request, Response, RpcError, error_codes};
+use tokio::sync::{mpsc, oneshot, Mutex};
 
 pub type IncomingRequest = (Request, oneshot::Sender<Response>);
 
 #[derive(thiserror::Error, Debug)]
 pub enum SdkTransportError {
-    #[error("io: {0}")] Io(#[from] std::io::Error),
-    #[error("rpc: {0}")] Rpc(#[from] RpcError),
-    #[error("closed")] Closed,
-    #[error("timeout")] Timeout,
-    #[error("decode: {0}")] Decode(String),
+    #[error("io: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("rpc: {0}")]
+    Rpc(#[from] RpcError),
+    #[error("closed")]
+    Closed,
+    #[error("timeout")]
+    Timeout,
+    #[error("decode: {0}")]
+    Decode(String),
 }
 
 pub struct StdioTransport {
@@ -47,7 +52,7 @@ impl StdioTransport {
                     std::io::Error::last_os_error()
                 );
             }
-            let devnull = libc::open(b"/dev/null\0".as_ptr() as *const _, libc::O_WRONLY);
+            let devnull = libc::open(c"/dev/null".as_ptr(), libc::O_WRONLY);
             if devnull < 0 {
                 panic!(
                     "tideline-sdk: open(/dev/null) failed: {}",
@@ -87,11 +92,16 @@ impl StdioTransport {
                             if let Ok(resp) = rx.await {
                                 let _ = out.send(Message::Response(resp)).await;
                             } else {
-                                let _ = out.send(Message::Response(Response::err(id, RpcError {
-                                    code: error_codes::INTERNAL_ERROR,
-                                    message: "handler dropped".into(),
-                                    data: None,
-                                }))).await;
+                                let _ = out
+                                    .send(Message::Response(Response::err(
+                                        id,
+                                        RpcError {
+                                            code: error_codes::INTERNAL_ERROR,
+                                            message: "handler dropped".into(),
+                                            data: None,
+                                        },
+                                    )))
+                                    .await;
                             }
                         });
                     }
@@ -100,7 +110,9 @@ impl StdioTransport {
                             let _ = tx.send(resp);
                         }
                     }
-                    Message::Notification(n) => { let _ = note_tx.send(n).await; }
+                    Message::Notification(n) => {
+                        let _ = note_tx.send(n).await;
+                    }
                 }
             }
         });
@@ -120,9 +132,15 @@ impl StdioTransport {
                     Err(_) => continue,
                 };
                 let header = format!("Content-Length: {}\r\n\r\n", bytes.len());
-                if writer.write_all(header.as_bytes()).is_err() { break; }
-                if writer.write_all(&bytes).is_err() { break; }
-                if writer.flush().is_err() { break; }
+                if writer.write_all(header.as_bytes()).is_err() {
+                    break;
+                }
+                if writer.write_all(&bytes).is_err() {
+                    break;
+                }
+                if writer.flush().is_err() {
+                    break;
+                }
             }
         });
 
@@ -140,23 +158,37 @@ impl StdioTransport {
     }
 
     pub async fn take_notifications(&self) -> mpsc::Receiver<Notification> {
-        self.notifications_rx.lock().await.take().expect("already taken")
+        self.notifications_rx
+            .lock()
+            .await
+            .take()
+            .expect("already taken")
     }
 
-    pub async fn call(&self, method: &str, params: Option<Value>, timeout: Duration)
-        -> Result<Value, SdkTransportError>
-    {
+    pub async fn call(
+        &self,
+        method: &str,
+        params: Option<Value>,
+        timeout: Duration,
+    ) -> Result<Value, SdkTransportError> {
         let id = {
             let mut n = self.next_id.lock().await;
-            let id = *n; *n += 1; Id::Number(id)
+            let id = *n;
+            *n += 1;
+            Id::Number(id)
         };
         let (tx, rx) = oneshot::channel();
         self.pending.lock().await.insert(id.clone(), tx);
         let req = Request::new(id.clone(), method, params);
-        self.outbound.send(Message::Request(req)).await.map_err(|_| SdkTransportError::Closed)?;
+        self.outbound
+            .send(Message::Request(req))
+            .await
+            .map_err(|_| SdkTransportError::Closed)?;
         match tokio::time::timeout(timeout, rx).await {
             Ok(Ok(resp)) => {
-                if let Some(err) = resp.error { return Err(SdkTransportError::Rpc(err)); }
+                if let Some(err) = resp.error {
+                    return Err(SdkTransportError::Rpc(err));
+                }
                 Ok(resp.result.unwrap_or(Value::Null))
             }
             Ok(Err(_)) => Err(SdkTransportError::Closed),
@@ -167,7 +199,11 @@ impl StdioTransport {
         }
     }
 
-    pub async fn notify(&self, method: &str, params: Option<Value>) -> Result<(), SdkTransportError> {
+    pub async fn notify(
+        &self,
+        method: &str,
+        params: Option<Value>,
+    ) -> Result<(), SdkTransportError> {
         self.outbound
             .send(Message::Notification(Notification::new(method, params)))
             .await

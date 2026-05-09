@@ -95,7 +95,11 @@ pub fn settings_section(
         format!(
             "Push-to-talk is active on {} input{}.",
             cfg.enabled_sources.len(),
-            if cfg.enabled_sources.len() == 1 { "" } else { "s" }
+            if cfg.enabled_sources.len() == 1 {
+                ""
+            } else {
+                "s"
+            }
         )
     };
     children.push(json!({

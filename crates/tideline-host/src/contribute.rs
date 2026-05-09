@@ -51,7 +51,9 @@ pub async fn collect_pipewire_contributions(
     cfg: &tideline_core::model::AppConfig,
     mix_mutes: &[tideline_sdk::contribute::MixMuteEntry],
 ) -> Vec<PluginContribution> {
-    use tideline_sdk::contribute::{PipewireContributeRequest, PipewireContributeResponse, SerializedAppConfig};
+    use tideline_sdk::contribute::{
+        PipewireContributeRequest, PipewireContributeResponse, SerializedAppConfig,
+    };
 
     let cfg_value = match serde_json::to_value(cfg) {
         Ok(v) => v,
@@ -65,12 +67,17 @@ pub async fn collect_pipewire_contributions(
     let plugin_ids = registry
         .plugins_with_capability(tideline_sdk::Capability::PipewireContribute)
         .await;
-    eprintln!("[contribute] plugins_with_capability(pipewire.contribute) = {:?}", plugin_ids);
+    eprintln!(
+        "[contribute] plugins_with_capability(pipewire.contribute) = {:?}",
+        plugin_ids
+    );
 
     let mut out = Vec::with_capacity(plugin_ids.len());
     for plugin_id in plugin_ids {
         let req = PipewireContributeRequest {
-            config: SerializedAppConfig { json: cfg_value.clone() },
+            config: SerializedAppConfig {
+                json: cfg_value.clone(),
+            },
             mix_mutes: mix_mutes.to_vec(),
         };
         let params = match serde_json::to_value(&req) {
@@ -96,11 +103,17 @@ pub async fn collect_pipewire_contributions(
             Ok(r) => r,
             Err(e) => {
                 tracing::warn!(plugin = %plugin_id, error = %e, "parse contribute response failed");
-                eprintln!("[contribute] {plugin_id}: parse response failed: {e}; raw = {}", raw);
+                eprintln!(
+                    "[contribute] {plugin_id}: parse response failed: {e}; raw = {}",
+                    raw
+                );
                 continue;
             }
         };
-        eprintln!("[contribute] {plugin_id}: got {} directives", resp.directives.len());
+        eprintln!(
+            "[contribute] {plugin_id}: got {} directives",
+            resp.directives.len()
+        );
         if resp.directives.is_empty() {
             continue;
         }

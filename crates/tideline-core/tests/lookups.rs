@@ -9,7 +9,10 @@ fn channel_by_uuid_and_by_name() {
     let game_uuid = cfg.channels[0].uuid;
 
     assert_eq!(cfg.channel_by_uuid(game_uuid).unwrap().name, "Game");
-    assert_eq!(cfg.channel_by_name("Music").unwrap().uuid, cfg.channels[1].uuid);
+    assert_eq!(
+        cfg.channel_by_name("Music").unwrap().uuid,
+        cfg.channels[1].uuid
+    );
     assert!(cfg.channel_by_uuid(Uuid::nil()).is_none());
     assert!(cfg.channel_by_name("Nope").is_none());
 }

@@ -15,5 +15,9 @@ export default defineConfig({
         globals: true,
         setupFiles: ['src/test-setup.ts'],
         include: ['src/**/*.test.ts'],
+        // vite 6 + vite-plugin-svelte 5.1 + lightningcss (a transitive optional
+        // dep) crashes inside preprocessCSS when compiling <style> blocks
+        // under vitest. Force postcss to side-step the lightningcss path.
+        css: { transformer: 'postcss' },
     },
 });

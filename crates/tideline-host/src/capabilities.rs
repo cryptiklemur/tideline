@@ -26,7 +26,9 @@ pub struct CapabilitySet {
 
 impl CapabilitySet {
     pub fn new(caps: impl IntoIterator<Item = Capability>) -> Self {
-        Self { set: caps.into_iter().collect() }
+        Self {
+            set: caps.into_iter().collect(),
+        }
     }
 
     pub fn has(&self, c: Capability) -> bool {
@@ -76,19 +78,21 @@ pub fn required_capability_for(method: &str) -> Option<Capability> {
         "host/ui.channel_overlay.focus" => UiChannelOverlay,
         "host/keybind.register" | "host/keybind.unregister" => KeybindRegister,
         "host/contributions.register_settings_section"
-            | "host/contributions.unregister_settings_section" => UiSettingsSection,
-        "host/contributions.register_status_pill"
-            | "host/contributions.unregister_status_pill" => UiStatusPill,
+        | "host/contributions.unregister_settings_section" => UiSettingsSection,
+        "host/contributions.register_status_pill" | "host/contributions.unregister_status_pill" => {
+            UiStatusPill
+        }
         "host/contributions.register_channel_overlay"
-            | "host/contributions.unregister_channel_overlay" => UiChannelOverlay,
+        | "host/contributions.unregister_channel_overlay" => UiChannelOverlay,
         "host/contributions.register_iframe_surface"
-            | "host/contributions.unregister_iframe_surface" => UiIframe,
-        "host/contributions.register_tray_item"
-            | "host/contributions.unregister_tray_item" => TrayContribute,
+        | "host/contributions.unregister_iframe_surface" => UiIframe,
+        "host/contributions.register_tray_item" | "host/contributions.unregister_tray_item" => {
+            TrayContribute
+        }
         "host/contributions.register_keybind_action"
-            | "host/contributions.unregister_keybind_action" => KeybindRegister,
+        | "host/contributions.unregister_keybind_action" => KeybindRegister,
         "host/contributions.register_input_overlay"
-            | "host/contributions.unregister_input_overlay" => UiInputOverlay,
+        | "host/contributions.unregister_input_overlay" => UiInputOverlay,
         "host/pipewire.contribute" => PipewireContribute,
         "host/config.namespace.get" => ConfigNamespaceRead,
         "host/config.namespace.set" => ConfigNamespaceWrite,
@@ -115,7 +119,10 @@ mod tests {
 
     #[test]
     fn channel_list_requires_channel_read() {
-        assert_eq!(required_capability_for("host/channel.list"), Some(Capability::ChannelRead));
+        assert_eq!(
+            required_capability_for("host/channel.list"),
+            Some(Capability::ChannelRead)
+        );
     }
 
     #[test]
@@ -137,13 +144,22 @@ mod tests {
     #[test]
     fn audio_play_requires_audio_play_capability() {
         // Reconciliation: canonical audio.play replaces wave-1-draft audio.tone + audio.sample.
-        assert_eq!(required_capability_for("host/audio.play"), Some(Capability::AudioPlay));
+        assert_eq!(
+            required_capability_for("host/audio.play"),
+            Some(Capability::AudioPlay)
+        );
     }
 
     #[test]
     fn notify_requires_tray_contribute() {
         // Reconciliation: tray.contribute replaces wave-1-draft tray.menu + tray.notify.
-        assert_eq!(required_capability_for("host/notify"), Some(Capability::TrayContribute));
-        assert_eq!(required_capability_for("host/notify.send"), Some(Capability::TrayContribute));
+        assert_eq!(
+            required_capability_for("host/notify"),
+            Some(Capability::TrayContribute)
+        );
+        assert_eq!(
+            required_capability_for("host/notify.send"),
+            Some(Capability::TrayContribute)
+        );
     }
 }

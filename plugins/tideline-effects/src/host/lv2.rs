@@ -2,7 +2,6 @@
 //! UI hosting (suil) is wired in Step 13.
 
 use std::collections::HashMap;
-use std::ffi::CStr;
 use std::sync::mpsc::{Receiver, SyncSender};
 use std::sync::Arc;
 
@@ -94,9 +93,7 @@ impl PluginFormat for Lv2Format {
 
     fn scan(&self) -> Vec<PluginInfo> {
         let world = self.world.read().clone();
-        let x11_ui_node = world
-            .raw()
-            .new_uri(crate::host::lv2_ui::LV2_UI_X11_UI);
+        let x11_ui_node = world.raw().new_uri(crate::host::lv2_ui::LV2_UI_X11_UI);
         world
             .iter_plugins()
             .filter_map(|p| {
@@ -194,8 +191,7 @@ impl PluginFormat for Lv2Format {
             }
         }
 
-        let event_transfer_urid = features
-            .urid(CStr::from_bytes_with_nul(b"http://lv2plug.in/ns/ext/atom#eventTransfer\0").unwrap());
+        let event_transfer_urid = features.urid(c"http://lv2plug.in/ns/ext/atom#eventTransfer");
 
         Ok(Box::new(Lv2Plugin {
             info: info.clone(),
@@ -294,13 +290,7 @@ impl Plugin for Lv2Plugin {
         Ok(())
     }
 
-    fn process(
-        &mut self,
-        in_l: &[f32],
-        in_r: &[f32],
-        out_l: &mut [f32],
-        out_r: &mut [f32],
-    ) {
+    fn process(&mut self, in_l: &[f32], in_r: &[f32], out_l: &mut [f32], out_r: &mut [f32]) {
         // Drain any UI → plugin atoms (e.g. LSP mesh subscribe requests)
         // into the matching atom_in port BEFORE we run the plugin. Without
         // this the UI's subscription handshake never completes and analysis
@@ -326,23 +316,21 @@ impl Plugin for Lv2Plugin {
                 // 4 KiB per UI → plugin atom is plenty for LSP-style Object
                 // requests; subscription messages are typically <200 bytes.
                 match livi::event::LV2AtomEventBuilder::<4096>::new(0, type_urid, body) {
-                    Ok(event) => {
-                        match self.atom_in[in_idx].push_event(&event) {
-                            Ok(_) => tracing::trace!(
-                                port_index = atom.port_index,
-                                size,
-                                type_urid,
-                                "atom_in push ok"
-                            ),
-                            Err(e) => tracing::warn!(
-                                error = ?e,
-                                port_index = atom.port_index,
-                                size,
-                                type_urid,
-                                "atom_in push failed"
-                            ),
-                        }
-                    }
+                    Ok(event) => match self.atom_in[in_idx].push_event(&event) {
+                        Ok(_) => tracing::trace!(
+                            port_index = atom.port_index,
+                            size,
+                            type_urid,
+                            "atom_in push ok"
+                        ),
+                        Err(e) => tracing::warn!(
+                            error = ?e,
+                            port_index = atom.port_index,
+                            size,
+                            type_urid,
+                            "atom_in push failed"
+                        ),
+                    },
                     Err(e) => {
                         tracing::warn!(error = ?e, size, "ui→plugin atom too large");
                     }
@@ -358,10 +346,7 @@ impl Plugin for Lv2Plugin {
 
         let ports = livi::PortConnections {
             audio_inputs: audio_in.iter().copied().take(n_in),
-            audio_outputs: audio_out_arr
-                .iter_mut()
-                .map(|b| &mut **b)
-                .take(n_out),
+            audio_outputs: audio_out_arr.iter_mut().map(|b| &mut **b).take(n_out),
             atom_sequence_inputs: self.atom_in.iter(),
             atom_sequence_outputs: self.atom_out.iter_mut(),
             cv_inputs: std::iter::empty::<&[f32]>(),

@@ -71,11 +71,7 @@ impl AuditionStore {
         }
     }
 
-    pub async fn start_record(
-        &self,
-        channel: Uuid,
-        physical_source: &str,
-    ) -> Result<(), String> {
+    pub async fn start_record(&self, channel: Uuid, physical_source: &str) -> Result<(), String> {
         let mut g = self.inner.lock().await;
         match g.as_ref() {
             Some(s) if s.phase != AuditionPhase::Idle => {
@@ -106,12 +102,7 @@ impl AuditionStore {
         // any reason, the orphan pw-cat is reaped instead of holding a
         // stream into the user's mic forever.
         let child = Command::new("pw-cat")
-            .args([
-                "--record",
-                "--target",
-                physical_source,
-                "--channels=1",
-            ])
+            .args(["--record", "--target", physical_source, "--channels=1"])
             .arg(&sample_path)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -210,7 +201,9 @@ impl AuditionStore {
     /// post-load_file). Loop must be stopped first.
     pub async fn save_recording(&self, channel: Uuid, dest: PathBuf) -> Result<(), String> {
         let g = self.inner.lock().await;
-        let sess = g.as_ref().ok_or_else(|| "no audition session".to_string())?;
+        let sess = g
+            .as_ref()
+            .ok_or_else(|| "no audition session".to_string())?;
         if sess.channel_uuid != channel {
             return Err(format!(
                 "audition belongs to {}, not {channel}",
@@ -244,9 +237,7 @@ impl AuditionStore {
 
     pub async fn stop_record(&self, channel: Uuid) -> Result<PathBuf, String> {
         let mut g = self.inner.lock().await;
-        let sess = g
-            .as_mut()
-            .ok_or_else(|| "no active audition".to_string())?;
+        let sess = g.as_mut().ok_or_else(|| "no active audition".to_string())?;
         if sess.channel_uuid != channel {
             return Err(format!(
                 "audition belongs to {}, not {channel}",
@@ -799,7 +790,6 @@ pub async fn handle_record_stop(
     }))
 }
 
-
 #[derive(Deserialize)]
 struct LoadFileParams {
     channel_uuid: Uuid,
@@ -870,7 +860,6 @@ pub async fn handle_loop_stop(
     Ok(serde_json::json!({ "ok": true }))
 }
 
-
 pub async fn handle_loop_pause(
     state: &Arc<EffectsState>,
     _host: Arc<HostClient>,
@@ -907,12 +896,8 @@ pub async fn handle_discard(
     let p: ChannelOnlyParams = parse_params(params, "effects.audition_discard")?;
     // Snapshot whether we were looping so we know if we need to poke
     // pipewire to tear down the audition source.
-    let was_looping = state
-        .audition
-        .status_for(p.channel_uuid)
-        .await
-        .phase
-        == AuditionPhase::Looping;
+    let was_looping =
+        state.audition.status_for(p.channel_uuid).await.phase == AuditionPhase::Looping;
     state.audition.discard(Some(p.channel_uuid)).await;
     if was_looping {
         poke_rebuild(&host, "audition_discard").await;

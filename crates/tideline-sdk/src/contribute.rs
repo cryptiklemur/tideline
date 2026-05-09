@@ -24,7 +24,10 @@ pub struct PipewireContributeResponse {
     pub directives: Vec<PipewireDirective>,
 }
 
-pub fn on_pipewire_contribute<F>(req: PipewireContributeRequest, f: F) -> anyhow::Result<PipewireContributeResponse>
+pub fn on_pipewire_contribute<F>(
+    req: PipewireContributeRequest,
+    f: F,
+) -> anyhow::Result<PipewireContributeResponse>
 where
     F: FnOnce(AppConfig, Vec<MixMuteEntry>) -> anyhow::Result<Vec<PipewireDirective>>,
 {

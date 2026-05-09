@@ -1,13 +1,16 @@
 use serde_json::json;
 use tideline_core::pipewire::directive::{LoadModuleHeader, PipewireDirective};
 use tideline_sdk::contribute::{
-    PipewireContributeRequest, PipewireContributeResponse, SerializedAppConfig, on_pipewire_contribute,
+    on_pipewire_contribute, PipewireContributeRequest, PipewireContributeResponse,
+    SerializedAppConfig,
 };
 
 #[test]
 fn helper_invokes_user_closure() {
     let req = PipewireContributeRequest {
-        config: SerializedAppConfig { json: json!({"channels": []}) },
+        config: SerializedAppConfig {
+            json: json!({"channels": []}),
+        },
         mix_mutes: vec![],
     };
     let resp: PipewireContributeResponse = on_pipewire_contribute(req, |_cfg, _mutes| {

@@ -83,7 +83,6 @@ pub trait PluginUi: Send {
     }
 }
 
-
 /// Back-channel from the plugin UI into the host. The plugin's UI thread
 /// invokes [`UiController::write_param`] when the user manipulates a control
 /// — implementations route the write back into the audio engine so the
@@ -115,7 +114,9 @@ pub struct FormatRegistry {
 
 impl FormatRegistry {
     pub fn new() -> Self {
-        Self { formats: Vec::new() }
+        Self {
+            formats: Vec::new(),
+        }
     }
 
     pub fn register(&mut self, format: Arc<dyn PluginFormat>) {
@@ -137,7 +138,6 @@ impl FormatRegistry {
         }
         out
     }
-
 
     /// Tell every format to rebuild its plugin index. Cheap for formats
     /// that already re-walk on `scan()`; heavier for LV2 where lilv's

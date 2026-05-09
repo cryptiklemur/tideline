@@ -1,5 +1,7 @@
 use tideline_core::pipewire::contribute::apply_contribution;
-use tideline_core::pipewire::directive::{ArgValue, LoadModuleHeader, PipewireDirective, RewireableTag};
+use tideline_core::pipewire::directive::{
+    ArgValue, LoadModuleHeader, PipewireDirective, RewireableTag,
+};
 
 fn tag() -> RewireableTag {
     RewireableTag {

@@ -65,11 +65,7 @@ fn migrate_legacy_state_file(new_path: &std::path::Path, legacy_path: &str) {
             new_path.display()
         );
     } else {
-        eprintln!(
-            "[migrate] moved {} to {}",
-            legacy_path,
-            new_path.display()
-        );
+        eprintln!("[migrate] moved {} to {}", legacy_path, new_path.display());
     }
 }
 
@@ -342,7 +338,11 @@ fn ensure_audio_backend() -> AudioBackendStatus {
         }
     }
 
-    let units = ["pipewire.socket", "pipewire-pulse.socket", "wireplumber.service"];
+    let units = [
+        "pipewire.socket",
+        "pipewire-pulse.socket",
+        "wireplumber.service",
+    ];
     for unit in units {
         if systemctl_user_is_active(unit) {
             continue;
@@ -371,7 +371,9 @@ fn ensure_audio_backend() -> AudioBackendStatus {
     }
 
     if status.server_name.is_none() {
-        status.errors.push("pactl info still returns no server after start attempt".to_string());
+        status
+            .errors
+            .push("pactl info still returns no server after start attempt".to_string());
     }
     status
 }
@@ -406,7 +408,12 @@ fn fetch_sink_inputs() -> Vec<SinkInput> {
                 .and_then(|v| v["value_percent"].as_str())
                 .and_then(|s| s.trim_end_matches('%').parse::<u32>().ok())
                 .unwrap_or(100);
-            Some(SinkInput { index, node_name, muted, volume })
+            Some(SinkInput {
+                index,
+                node_name,
+                muted,
+                volume,
+            })
         })
         .collect()
 }
@@ -423,10 +430,7 @@ fn fetch_sinks() -> Vec<SinkInfo> {
             if name.starts_with("sink.") {
                 return None;
             }
-            let description = item["description"]
-                .as_str()
-                .unwrap_or(&name)
-                .to_string();
+            let description = item["description"].as_str().unwrap_or(&name).to_string();
             let muted = item["mute"].as_bool().unwrap_or(false);
             let volume_percent = item["volume"]
                 .as_object()
@@ -434,7 +438,12 @@ fn fetch_sinks() -> Vec<SinkInfo> {
                 .and_then(|v| v["value_percent"].as_str())
                 .and_then(|s| s.trim_end_matches('%').parse::<u32>().ok())
                 .unwrap_or(100);
-            Some(SinkInfo { name, description, muted, volume_percent })
+            Some(SinkInfo {
+                name,
+                description,
+                muted,
+                volume_percent,
+            })
         })
         .collect()
 }
@@ -448,10 +457,7 @@ fn fetch_sources() -> Vec<SourceInfo> {
         .iter()
         .filter_map(|item| {
             let name = item["name"].as_str()?.to_string();
-            let description = item["description"]
-                .as_str()
-                .unwrap_or(&name)
-                .to_string();
+            let description = item["description"].as_str().unwrap_or(&name).to_string();
             Some(SourceInfo { name, description })
         })
         .collect()
@@ -533,12 +539,29 @@ fn fetch_running_apps() -> Vec<RunningApp> {
         if node_name.starts_with("playback.") || node_name.starts_with("capture.") {
             continue;
         }
-        let binary = props["application.process.binary"].as_str().unwrap_or("").to_string();
-        if binary.is_empty() { continue; }
-        if !seen.insert(binary.clone()) { continue; }
-        let application_name = props["application.name"].as_str().unwrap_or(&binary).to_string();
-        let sink = item["sink"].as_u64().map(|n| n.to_string()).unwrap_or_default();
-        out.push(RunningApp { binary, application_name, sink });
+        let binary = props["application.process.binary"]
+            .as_str()
+            .unwrap_or("")
+            .to_string();
+        if binary.is_empty() {
+            continue;
+        }
+        if !seen.insert(binary.clone()) {
+            continue;
+        }
+        let application_name = props["application.name"]
+            .as_str()
+            .unwrap_or(&binary)
+            .to_string();
+        let sink = item["sink"]
+            .as_u64()
+            .map(|n| n.to_string())
+            .unwrap_or_default();
+        out.push(RunningApp {
+            binary,
+            application_name,
+            sink,
+        });
     }
     out
 }
@@ -560,7 +583,9 @@ pub struct ChannelVolumes {
     pub mix_muted: HashMap<String, bool>,
 }
 
-fn default_master_pct() -> u32 { 100 }
+fn default_master_pct() -> u32 {
+    100
+}
 
 impl Default for ChannelVolumes {
     fn default() -> Self {
@@ -582,13 +607,14 @@ fn read_all_volumes() -> HashMap<String, ChannelVolumes> {
         .unwrap_or_default()
 }
 
-
 /// Build the per-(channel, mix) mute table that the pipewire contributor
 /// needs. effective mute = master_muted || per-mix muted, surfaced as
 /// `MixMuteEntry { muted = true }` so the contributor skips the matching
 /// post-loopback. unmuted pairs are emitted with `muted = false` for
 /// completeness; the contributor only acts on muted=true entries.
-pub fn build_mix_mutes(cfg: &tideline_core::model::AppConfig) -> Vec<tideline_sdk::contribute::MixMuteEntry> {
+pub fn build_mix_mutes(
+    cfg: &tideline_core::model::AppConfig,
+) -> Vec<tideline_sdk::contribute::MixMuteEntry> {
     let vols = read_all_volumes();
     let mut out = Vec::new();
     for ch in &cfg.channels {
@@ -607,17 +633,6 @@ pub fn build_mix_mutes(cfg: &tideline_core::model::AppConfig) -> Vec<tideline_sd
     }
     out
 }
-
-
-
-
-
-
-
-
-
-
-
 
 fn write_all_volumes(map: &HashMap<String, ChannelVolumes>) {
     let path = volumes_path();
@@ -645,7 +660,12 @@ fn sink_input_indexes_for_channel_mix(channel_slug: &str, mix_id: &str) -> Vec<u
         .collect()
 }
 
-fn apply_channel_volumes(app: &AppHandle, channel_slug: &str, vols: &ChannelVolumes, mix_ids: &[String]) {
+fn apply_channel_volumes(
+    app: &AppHandle,
+    channel_slug: &str,
+    vols: &ChannelVolumes,
+    mix_ids: &[String],
+) {
     // Mute is enforced here by clamping the post-loopback's playback
     // sink-input volume to 0%. pulse `set-sink-input-mute` did not
     // propagate reliably to pw-native loopback streams, but volume does.
@@ -653,9 +673,12 @@ fn apply_channel_volumes(app: &AppHandle, channel_slug: &str, vols: &ChannelVolu
     let snapshot = fetch_sink_inputs();
     for mix_id in mix_ids {
         let mix_pct = vols.mixes.get(mix_id).copied().unwrap_or(100);
-        let muted = vols.master_muted
-            || vols.mix_muted.get(mix_id).copied().unwrap_or(false);
-        let final_pct = if muted { 0 } else { product_pct(vols.master, mix_pct) };
+        let muted = vols.master_muted || vols.mix_muted.get(mix_id).copied().unwrap_or(false);
+        let final_pct = if muted {
+            0
+        } else {
+            product_pct(vols.master, mix_pct)
+        };
         let prefix = format!("playback.{}-{}-", channel_slug, mix_id);
         let indexes: Vec<u32> = snapshot
             .iter()
@@ -663,7 +686,11 @@ fn apply_channel_volumes(app: &AppHandle, channel_slug: &str, vols: &ChannelVolu
             .map(|s| s.index)
             .collect();
         for idx in &indexes {
-            if pactl_check(&["set-sink-input-volume", &idx.to_string(), &format!("{}%", final_pct)]) {
+            if pactl_check(&[
+                "set-sink-input-volume",
+                &idx.to_string(),
+                &format!("{}%", final_pct),
+            ]) {
                 emit_sink_input_volume(app, *idx, final_pct);
             }
         }
@@ -702,7 +729,12 @@ fn get_all_channel_volumes() -> HashMap<String, ChannelVolumes> {
 }
 
 #[tauri::command]
-fn set_channel_master_volume(app: AppHandle, channel: String, pct: u32, state: State<'_, AppState>) {
+fn set_channel_master_volume(
+    app: AppHandle,
+    channel: String,
+    pct: u32,
+    state: State<'_, AppState>,
+) {
     let cfg = state.config.lock().unwrap().clone();
     let mix_ids: Vec<String> = cfg.mixes.iter().map(|m| m.id.clone()).collect();
     let mut all = read_all_volumes();
@@ -722,12 +754,15 @@ fn set_channel_mix_volume(app: AppHandle, channel: String, mix_id: String, pct: 
     write_all_volumes(&all);
     let final_pct = product_pct(snap.master, pct.min(100));
     for idx in sink_input_indexes_for_channel_mix(&slug(&channel), &mix_id) {
-        if pactl_check(&["set-sink-input-volume", &idx.to_string(), &format!("{}%", final_pct)]) {
+        if pactl_check(&[
+            "set-sink-input-volume",
+            &idx.to_string(),
+            &format!("{}%", final_pct),
+        ]) {
             emit_sink_input_volume(&app, idx, final_pct);
         }
     }
 }
-
 
 #[tauri::command]
 fn set_channel_master_mute(
@@ -755,7 +790,13 @@ fn set_channel_master_mute(
 }
 
 #[tauri::command]
-fn set_channel_mix_mute(app: AppHandle, channel: String, mix_id: String, muted: bool, state: State<'_, AppState>) {
+fn set_channel_mix_mute(
+    app: AppHandle,
+    channel: String,
+    mix_id: String,
+    muted: bool,
+    state: State<'_, AppState>,
+) {
     let cfg = state.config.lock().unwrap().clone();
     let mix_ids: Vec<String> = cfg.mixes.iter().map(|m| m.id.clone()).collect();
     let mut all = read_all_volumes();
@@ -797,8 +838,12 @@ fn write_mix_enabled(map: &HashMap<String, bool>) {
     }
 }
 
-fn mix_enabled_with_defaults(stored: &HashMap<String, bool>, mixes: &[Mix]) -> HashMap<String, bool> {
-    mixes.iter()
+fn mix_enabled_with_defaults(
+    stored: &HashMap<String, bool>,
+    mixes: &[Mix],
+) -> HashMap<String, bool> {
+    mixes
+        .iter()
         .map(|m| (m.id.clone(), *stored.get(&m.id).unwrap_or(&true)))
         .collect()
 }
@@ -811,7 +856,9 @@ fn apply_mix_enabled(app: &AppHandle, enabled: &HashMap<String, bool>, cfg: &App
         .collect();
 
     for ch in &cfg.channels {
-        if ch.kind != ChannelKind::Output { continue; }
+        if ch.kind != ChannelKind::Output {
+            continue;
+        }
         for mix in &cfg.mixes {
             let muted = !*enabled.get(&mix.id).unwrap_or(&true);
             let mute_arg = if muted { "1" } else { "0" };
@@ -843,7 +890,13 @@ async fn restart_pipewire_stack(registry: &Arc<tideline_host::PluginRegistry>) {
         .publish_host_event("host:pipewire_restarting", serde_json::json!({}))
         .await;
     let _ = Command::new("systemctl")
-        .args(["--user", "restart", "wireplumber", "pipewire-pulse", "pipewire"])
+        .args([
+            "--user",
+            "restart",
+            "wireplumber",
+            "pipewire-pulse",
+            "pipewire",
+        ])
         .status();
     // Give the stack a moment to come back up before notifying plugins to
     // re-attach. Without this the JACK socket may not be ready when our
@@ -873,7 +926,10 @@ fn snapshot_source_mutes() -> Vec<(String, bool)> {
         let muted = item.get("mute").and_then(|v| v.as_bool()).unwrap_or(false);
         out.push((name.to_string(), muted));
     }
-    eprintln!("[pipewire] snapshot_source_mutes captured {} sources", out.len());
+    eprintln!(
+        "[pipewire] snapshot_source_mutes captured {} sources",
+        out.len()
+    );
     out
 }
 
@@ -923,7 +979,8 @@ pub async fn write_pipewire_and_restart(
         channels_with_fx
     );
     let mix_mutes = build_mix_mutes(cfg);
-    let raw = tideline_host::contribute::collect_pipewire_contributions(registry, cfg, &mix_mutes).await;
+    let raw =
+        tideline_host::contribute::collect_pipewire_contributions(registry, cfg, &mix_mutes).await;
     let raw_counts: Vec<(String, usize)> = raw
         .iter()
         .map(|c| (c.plugin_id.clone(), c.directives.len()))
@@ -935,7 +992,10 @@ pub async fn write_pipewire_and_restart(
             .map(|c| c.directives)
             .collect();
     let post_counts: Vec<usize> = contributions.iter().map(|d| d.len()).collect();
-    eprintln!("[pipewire] post-resolve directive counts: {:?}", post_counts);
+    eprintln!(
+        "[pipewire] post-resolve directive counts: {:?}",
+        post_counts
+    );
     // Skip restart entirely if the rendered conf is byte-identical to what's
     // already on disk. This collapses the rapid-fire rebuilds (multiple
     // attach_channel_data + rack_changed pokes within the same debounce
@@ -961,7 +1021,10 @@ pub async fn write_pipewire_and_restart(
 
     let mut msg = String::from("Applied. Audio engine restarted.");
     if !backed_up.is_empty() {
-        msg.push_str(&format!(" Legacy files backed up: {}", backed_up.join(", ")));
+        msg.push_str(&format!(
+            " Legacy files backed up: {}",
+            backed_up.join(", ")
+        ));
     }
     Ok(msg)
 }
@@ -1114,7 +1177,6 @@ pub async fn wire_fx_links(cfg: &AppConfig) {
     }
 }
 
-
 /// Like `write_pipewire_and_restart` but DOES NOT restart pipewire. Used
 /// when a change has already been applied incrementally via pw-cli
 /// (e.g. per-mix mute toggle) and we just need the conf on disk to
@@ -1124,7 +1186,8 @@ pub async fn write_pipewire_conf_only(
     registry: &Arc<tideline_host::PluginRegistry>,
 ) -> Result<(), String> {
     let mix_mutes = build_mix_mutes(cfg);
-    let raw = tideline_host::contribute::collect_pipewire_contributions(registry, cfg, &mix_mutes).await;
+    let raw =
+        tideline_host::contribute::collect_pipewire_contributions(registry, cfg, &mix_mutes).await;
     let contributions: Vec<Vec<tideline_core::pipewire::directive::PipewireDirective>> =
         tideline_host::contribute::resolve_collisions(raw)
             .into_iter()
@@ -1182,8 +1245,6 @@ fn pw_cli_load(module: &str, args: &str) -> Result<(), String> {
     Ok(())
 }
 
-
-
 fn pactl_load_null_sink(sink_name: &str, description: &str) -> Result<(), String> {
     let args = format!(
         "sink_name={} sink_properties=device.description=\"{}\" channel_map=front-left,front-right",
@@ -1214,7 +1275,7 @@ fn load_channel_modules(cfg: &AppConfig, ch: &ChannelCfg) -> Result<(), String> 
             .collect();
         for mix in &cfg.mixes {
             for (i, target) in mix.sinks.iter().enumerate() {
-                let pb  = mix_playback_node(ch, mix, i);
+                let pb = mix_playback_node(ch, mix, i);
                 if existing.contains(&pb) {
                     continue;
                 }
@@ -1239,7 +1300,7 @@ fn load_channel_modules(cfg: &AppConfig, ch: &ChannelCfg) -> Result<(), String> 
             for mix in &cfg.mixes {
                 for (i, target) in mix.sinks.iter().enumerate() {
                     let cap = mix_capture_node(ch, mix, i);
-                    let pb  = mix_playback_node(ch, mix, i);
+                    let pb = mix_playback_node(ch, mix, i);
                     let args = format!(
                         "{{ capture.props = {{ node.name = \"{cap}\" target.object = \"{sink_name}\" audio.position = \"FL,FR\" stream.dont-remix = true stream.capture.sink = true }} playback.props = {{ node.name = \"{pb}\" target.object = \"{target}\" audio.position = \"FL,FR\" }} }}",
                         cap = cap,
@@ -1285,14 +1346,22 @@ fn get_sink_inputs() -> Vec<SinkInput> {
 
 #[tauri::command]
 fn set_volume(app: AppHandle, index: u32, pct: u32) {
-    if pactl_check(&["set-sink-input-volume", &index.to_string(), &format!("{}%", pct)]) {
+    if pactl_check(&[
+        "set-sink-input-volume",
+        &index.to_string(),
+        &format!("{}%", pct),
+    ]) {
         emit_sink_input_volume(&app, index, pct);
     }
 }
 
 #[tauri::command]
 fn set_mute(app: AppHandle, index: u32, muted: bool) {
-    if pactl_check(&["set-sink-input-mute", &index.to_string(), if muted { "1" } else { "0" }]) {
+    if pactl_check(&[
+        "set-sink-input-mute",
+        &index.to_string(),
+        if muted { "1" } else { "0" },
+    ]) {
         emit_sink_input_mute(&app, index, muted);
     }
 }
@@ -1496,7 +1565,9 @@ fn desktop_search_dirs() -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = Vec::new();
     if let Ok(home) = std::env::var("HOME") {
         dirs.push(PathBuf::from(format!("{home}/.local/share/applications")));
-        dirs.push(PathBuf::from(format!("{home}/.local/share/flatpak/exports/share/applications")));
+        dirs.push(PathBuf::from(format!(
+            "{home}/.local/share/flatpak/exports/share/applications"
+        )));
     }
     dirs.push(PathBuf::from("/usr/local/share/applications"));
     dirs.push(PathBuf::from("/usr/share/applications"));
@@ -1514,7 +1585,9 @@ fn parse_desktop_entry(content: &str) -> HashMap<String, String> {
             in_main = trimmed == "[Desktop Entry]";
             continue;
         }
-        if !in_main || trimmed.is_empty() || trimmed.starts_with('#') { continue; }
+        if !in_main || trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
         if let Some((k, v)) = trimmed.split_once('=') {
             out.insert(k.trim().to_string(), v.trim().to_string());
         }
@@ -1523,14 +1596,24 @@ fn parse_desktop_entry(content: &str) -> HashMap<String, String> {
 }
 
 fn binary_name_from_command(cmd: &str) -> Option<String> {
-    let first = cmd.split_whitespace().find(|t| !t.starts_with('%') && !t.starts_with("env="))?;
+    let first = cmd
+        .split_whitespace()
+        .find(|t| !t.starts_with('%') && !t.starts_with("env="))?;
     let path = std::path::Path::new(first);
     Some(path.file_name()?.to_string_lossy().to_string())
 }
 
 fn strip_common_suffixes(name: &str) -> String {
     let lower = name.to_ascii_lowercase();
-    for suffix in ["-stable", "-bin", "-beta", "-nightly", "-dev", "-canary", "-unstable"] {
+    for suffix in [
+        "-stable",
+        "-bin",
+        "-beta",
+        "-nightly",
+        "-dev",
+        "-canary",
+        "-unstable",
+    ] {
         if let Some(stripped) = lower.strip_suffix(suffix) {
             return stripped.to_string();
         }
@@ -1551,13 +1634,17 @@ fn find_icon_name_for_binary(binary: &str) -> Option<String> {
         };
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().and_then(|s| s.to_str()) != Some("desktop") { continue; }
+            if path.extension().and_then(|s| s.to_str()) != Some("desktop") {
+                continue;
+            }
             let content = match fs::read_to_string(&path) {
                 Ok(c) => c,
                 Err(_) => continue,
             };
             let de = parse_desktop_entry(&content);
-            if de.get("NoDisplay").map(|v| v == "true").unwrap_or(false) { continue; }
+            if de.get("NoDisplay").map(|v| v == "true").unwrap_or(false) {
+                continue;
+            }
             let cmd = match de.get("Exec") {
                 Some(e) => e,
                 None => continue,
@@ -1575,9 +1662,16 @@ fn find_icon_name_for_binary(binary: &str) -> Option<String> {
             let bin_lower = bin.to_ascii_lowercase();
             let bin_stripped = strip_common_suffixes(&bin);
             let stem_lower = stem.to_ascii_lowercase();
-            let stem_last = stem_lower.rsplit('.').next().unwrap_or(&stem_lower).to_string();
+            let stem_last = stem_lower
+                .rsplit('.')
+                .next()
+                .unwrap_or(&stem_lower)
+                .to_string();
             let stem_stripped = strip_common_suffixes(&stem_last);
-            let wm_class = de.get("StartupWMClass").map(|s| s.to_ascii_lowercase()).unwrap_or_default();
+            let wm_class = de
+                .get("StartupWMClass")
+                .map(|s| s.to_ascii_lowercase())
+                .unwrap_or_default();
 
             let priority: Option<u32> = if bin_lower == needle || stem_last == needle {
                 Some(0)
@@ -1585,15 +1679,19 @@ fn find_icon_name_for_binary(binary: &str) -> Option<String> {
                 Some(1)
             } else if bin_stripped == needle_stripped || stem_stripped == needle_stripped {
                 Some(2)
-            } else if needle.len() >= 3 && (
-                stem_last.starts_with(&needle) || stem_last.ends_with(&needle)
-                || bin_lower.starts_with(&needle) || bin_lower.ends_with(&needle)
-            ) {
+            } else if needle.len() >= 3
+                && (stem_last.starts_with(&needle)
+                    || stem_last.ends_with(&needle)
+                    || bin_lower.starts_with(&needle)
+                    || bin_lower.ends_with(&needle))
+            {
                 Some(3)
-            } else if needle.len() >= 4 && (
-                stem_last.contains(&needle) || bin_lower.contains(&needle)
-                || needle.contains(&stem_last) || needle.contains(&bin_lower)
-            ) {
+            } else if needle.len() >= 4
+                && (stem_last.contains(&needle)
+                    || bin_lower.contains(&needle)
+                    || needle.contains(&stem_last)
+                    || needle.contains(&bin_lower))
+            {
                 Some(4)
             } else {
                 None
@@ -1601,10 +1699,14 @@ fn find_icon_name_for_binary(binary: &str) -> Option<String> {
 
             if let Some(p) = priority {
                 candidates.push((p, icon));
-                if p == 0 { break; }
+                if p == 0 {
+                    break;
+                }
             }
         }
-        if candidates.iter().any(|(p, _)| *p == 0) { break; }
+        if candidates.iter().any(|(p, _)| *p == 0) {
+            break;
+        }
     }
 
     candidates.sort_by_key(|(p, _)| *p);
@@ -1641,9 +1743,11 @@ fn resolve_icon_to_data_url(icon: &str) -> Option<String> {
 fn resolve_app_icons(binaries: Vec<String>) -> HashMap<String, Option<String>> {
     let mut out: HashMap<String, Option<String>> = HashMap::new();
     for bin in binaries {
-        if bin.is_empty() { out.insert(bin, None); continue; }
-        let resolved = find_icon_name_for_binary(&bin)
-            .and_then(|n| resolve_icon_to_data_url(&n));
+        if bin.is_empty() {
+            out.insert(bin, None);
+            continue;
+        }
+        let resolved = find_icon_name_for_binary(&bin).and_then(|n| resolve_icon_to_data_url(&n));
         out.insert(bin, resolved);
     }
     out
@@ -1691,7 +1795,14 @@ fn list_card_controls(card: u32) -> Vec<CardControl> {
 #[tauri::command]
 fn set_card_control_volume(app: AppHandle, card: u32, name: String, pct: u32) {
     let ok = Command::new("amixer")
-        .args(["-c", &card.to_string(), "-M", "sset", &name, &format!("{}%", pct)])
+        .args([
+            "-c",
+            &card.to_string(),
+            "-M",
+            "sset",
+            &name,
+            &format!("{}%", pct),
+        ])
         .status()
         .map(|s| s.success())
         .unwrap_or(false);
@@ -1740,22 +1851,36 @@ fn set_mix_enabled(id: String, enabled: bool, app: AppHandle, state: State<'_, A
 }
 
 fn parse_accelerator(accel: &str) -> Result<Shortcut, String> {
-    accel.parse::<Shortcut>().map_err(|e| format!("invalid shortcut '{}': {}", accel, e))
+    accel
+        .parse::<Shortcut>()
+        .map_err(|e| format!("invalid shortcut '{}': {}", accel, e))
 }
 
 fn channel_mute(app: &AppHandle, channel: &str) {
     let cfg = app.state::<AppState>().config.lock().unwrap().clone();
-    let Some(ch) = cfg.channels.iter().find(|c| c.name == channel) else { return };
+    let Some(ch) = cfg.channels.iter().find(|c| c.name == channel) else {
+        return;
+    };
     if ch.kind == ChannelKind::PhysicalInput {
-        if ch.physical_source.is_empty() { return; }
-        let cur = get_source_state(ch.physical_source.clone()).map(|(_, m)| m).unwrap_or(false);
+        if ch.physical_source.is_empty() {
+            return;
+        }
+        let cur = get_source_state(ch.physical_source.clone())
+            .map(|(_, m)| m)
+            .unwrap_or(false);
         let next = !cur;
-        if pactl_check(&["set-source-mute", &ch.physical_source, if next { "1" } else { "0" }]) {
+        if pactl_check(&[
+            "set-source-mute",
+            &ch.physical_source,
+            if next { "1" } else { "0" },
+        ]) {
             emit_source_mute(app, &ch.physical_source, next);
         }
     } else {
         let sink = sink_node_for_channel(ch);
-        let cur = get_sink_state(sink.clone()).map(|(_, m)| m).unwrap_or(false);
+        let cur = get_sink_state(sink.clone())
+            .map(|(_, m)| m)
+            .unwrap_or(false);
         let next = !cur;
         if pactl_check(&["set-sink-mute", &sink, if next { "1" } else { "0" }]) {
             emit_sink_mute(app, &sink, next);
@@ -1764,7 +1889,9 @@ fn channel_mute(app: &AppHandle, channel: &str) {
 }
 
 fn output_mute(app: &AppHandle, sink: &str) {
-    let cur = get_sink_state(sink.to_string()).map(|(_, m)| m).unwrap_or(false);
+    let cur = get_sink_state(sink.to_string())
+        .map(|(_, m)| m)
+        .unwrap_or(false);
     let next = !cur;
     if pactl_check(&["set-sink-mute", sink, if next { "1" } else { "0" }]) {
         emit_sink_mute(app, sink, next);
@@ -1786,12 +1913,20 @@ fn execute_keybind(app: &AppHandle, action: &KeybindAction) {
             *state.mix_enabled.lock().unwrap() = map;
             refresh_tray_menu(app);
         }
-        KeybindAction::Plugin { plugin_id, action_id } => {
-            let registry = app.state::<Arc<tideline_host::PluginRegistry>>().inner().clone();
+        KeybindAction::Plugin {
+            plugin_id,
+            action_id,
+        } => {
+            let registry = app
+                .state::<Arc<tideline_host::PluginRegistry>>()
+                .inner()
+                .clone();
             let plugin_id = plugin_id.clone();
             let action_id = action_id.clone();
             tauri::async_runtime::spawn(async move {
-                if let Err(e) = plugins::dispatch_plugin_keybind(&registry, &plugin_id, &action_id).await {
+                if let Err(e) =
+                    plugins::dispatch_plugin_keybind(&registry, &plugin_id, &action_id).await
+                {
                     eprintln!("plugin keybind dispatch failed: {e}");
                 }
             });
@@ -1828,7 +1963,12 @@ fn register_all_keybinds(app: &AppHandle) {
 }
 
 #[tauri::command]
-fn set_keybind(accelerator: String, action: KeybindAction, app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+fn set_keybind(
+    accelerator: String,
+    action: KeybindAction,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
     parse_accelerator(&accelerator)?;
     {
         let mut cfg = state.config.lock().unwrap();
@@ -1840,7 +1980,11 @@ fn set_keybind(accelerator: String, action: KeybindAction, app: AppHandle, state
 }
 
 #[tauri::command]
-fn clear_keybind(accelerator: String, app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+fn clear_keybind(
+    accelerator: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
     {
         let mut cfg = state.config.lock().unwrap();
         cfg.keybinds.remove(&accelerator);
@@ -1856,7 +2000,11 @@ fn get_config(state: State<'_, AppState>) -> AppConfig {
 }
 
 #[tauri::command]
-async fn save_config(config: AppConfig, app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
+async fn save_config(
+    config: AppConfig,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
     save_config_to_disk(&config)?;
 
     let registry = app
@@ -1870,12 +2018,16 @@ async fn save_config(config: AppConfig, app: AppHandle, state: State<'_, AppStat
         let mix_mutes = build_mix_mutes(&config);
         let contributions: Vec<Vec<tideline_core::pipewire::directive::PipewireDirective>> =
             tideline_host::contribute::resolve_collisions(
-                tideline_host::contribute::collect_pipewire_contributions(&registry, &config, &mix_mutes).await,
+                tideline_host::contribute::collect_pipewire_contributions(
+                    &registry, &config, &mix_mutes,
+                )
+                .await,
             )
             .into_iter()
             .map(|c| c.directives)
             .collect();
-        let backed_up = write_pipewire_conf_with_contributions(&config, &contributions, &mix_mutes)?;
+        let backed_up =
+            write_pipewire_conf_with_contributions(&config, &contributions, &mix_mutes)?;
         let mut soft_failed: Option<String> = None;
         for ch in &added {
             if let Err(e) = load_channel_modules(&config, ch) {
@@ -1884,11 +2036,14 @@ async fn save_config(config: AppConfig, app: AppHandle, state: State<'_, AppStat
             }
         }
         if soft_failed.is_none() {
-            let added_names: HashSet<&str> =
-                added.iter().map(|c| c.name.as_str()).collect();
+            let added_names: HashSet<&str> = added.iter().map(|c| c.name.as_str()).collect();
             for ch in &config.channels {
-                if ch.kind != ChannelKind::PhysicalInput { continue; }
-                if added_names.contains(ch.name.as_str()) { continue; }
+                if ch.kind != ChannelKind::PhysicalInput {
+                    continue;
+                }
+                if added_names.contains(ch.name.as_str()) {
+                    continue;
+                }
                 if let Err(e) = load_channel_modules(&config, ch) {
                     soft_failed = Some(e);
                     break;
@@ -1900,7 +2055,10 @@ async fn save_config(config: AppConfig, app: AppHandle, state: State<'_, AppStat
             restart_pipewire_stack(&registry).await;
             let mut m = String::from("Applied. Audio engine restarted (soft apply failed).");
             if !backed_up.is_empty() {
-                m.push_str(&format!(" Legacy files backed up: {}", backed_up.join(", ")));
+                m.push_str(&format!(
+                    " Legacy files backed up: {}",
+                    backed_up.join(", ")
+                ));
             }
             m
         } else {
@@ -1911,7 +2069,10 @@ async fn save_config(config: AppConfig, app: AppHandle, state: State<'_, AppStat
                 format!("Applied. {} channel(s) added without restart.", added.len())
             };
             if !backed_up.is_empty() {
-                m.push_str(&format!(" Legacy files backed up: {}", backed_up.join(", ")));
+                m.push_str(&format!(
+                    " Legacy files backed up: {}",
+                    backed_up.join(", ")
+                ));
             }
             m
         }
@@ -1927,7 +2088,11 @@ async fn save_config(config: AppConfig, app: AppHandle, state: State<'_, AppStat
 }
 
 #[tauri::command]
-fn save_config_quiet(config: AppConfig, app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+fn save_config_quiet(
+    config: AppConfig,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
     save_config_to_disk(&config)?;
     write_app_routing(&config)?;
     *state.config.lock().unwrap() = config;
@@ -1987,7 +2152,10 @@ fn list_sinks() -> Vec<SinkInfo> {
 
 #[tauri::command]
 fn list_sink_input_nodes() -> Vec<String> {
-    fetch_sink_inputs().into_iter().map(|s| s.node_name).collect()
+    fetch_sink_inputs()
+        .into_iter()
+        .map(|s| s.node_name)
+        .collect()
 }
 
 #[tauri::command]

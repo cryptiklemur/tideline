@@ -12,14 +12,14 @@ use std::path::PathBuf;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::{EnvFilter, fmt, Layer};
+use tracing_subscriber::{fmt, EnvFilter, Layer};
 
 const DEFAULT_FILTER: &str =
     "info,tideline=debug,tideline_effects=debug,tideline_sdk=debug,tideline_host=debug,tideline_core=debug";
 
 pub fn log_dir() -> PathBuf {
     dirs::cache_dir()
-        .unwrap_or_else(|| std::env::temp_dir())
+        .unwrap_or_else(std::env::temp_dir)
         .join("tideline")
         .join("logs")
 }
@@ -33,7 +33,10 @@ pub fn init(process_name: &str) -> Option<WorkerGuard> {
     let dir = log_dir();
     if let Err(e) = std::fs::create_dir_all(&dir) {
         // Fall back to stderr-only if the dir can't be created.
-        eprintln!("logging: cant create {}: {e}; using stderr only", dir.display());
+        eprintln!(
+            "logging: cant create {}: {e}; using stderr only",
+            dir.display()
+        );
         let stderr_layer = fmt::layer()
             .with_writer(std::io::stderr)
             .with_target(true)

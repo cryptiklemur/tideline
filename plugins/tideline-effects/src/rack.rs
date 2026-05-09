@@ -8,8 +8,8 @@ use uuid::Uuid;
 
 use crate::chain_ops;
 use crate::discovery::{self, Category};
-use crate::host::PluginInfo;
 use crate::effect::{Effect, PluginFormat};
+use crate::host::PluginInfo;
 use crate::iframe_bridge::persist_channel;
 use crate::overlay_render::channel_card_tree;
 use crate::state::EffectsState;
@@ -51,7 +51,10 @@ fn format_label(f: PluginFormat) -> &'static str {
     }
 }
 
-pub async fn list_catalog(state: &Arc<EffectsState>, params: Option<Value>) -> Result<Value, RpcError> {
+pub async fn list_catalog(
+    state: &Arc<EffectsState>,
+    params: Option<Value>,
+) -> Result<Value, RpcError> {
     // Optional `channel_kind: "physical_input" | "input" | "output"` lets the
     // recommender bias toward mono-variant plugins for mics and stereo for
     // everything else. Missing/unknown kinds default to stereo since most
@@ -175,7 +178,7 @@ fn recommended_uri_needles(channel_mono: bool) -> Vec<&'static str> {
     }
 }
 
-fn collect_recommended<'a>(plugins: &'a [PluginInfo], channel_mono: bool) -> Vec<&'a PluginInfo> {
+fn collect_recommended(plugins: &[PluginInfo], channel_mono: bool) -> Vec<&PluginInfo> {
     let mut out: Vec<&PluginInfo> = Vec::new();
     let needles = recommended_uri_needles(channel_mono);
     // Hide opposite-channel-count LSP variants from "Recommended" so a mono
@@ -213,8 +216,17 @@ fn recommended_install_children(plugins: &[PluginInfo]) -> Vec<Value> {
     let has_reaplugs = collection_installed(
         plugins,
         &[
-            "reacomp", "reaeq", "reagate", "reaxcomp", "reaverbate", "reapitch", "reafir",
-            "readelay", "reatune", "reaplugs", "cockos",
+            "reacomp",
+            "reaeq",
+            "reagate",
+            "reaxcomp",
+            "reaverbate",
+            "reapitch",
+            "reafir",
+            "readelay",
+            "reatune",
+            "reaplugs",
+            "cockos",
         ],
     );
     if !has_reaplugs {
@@ -806,7 +818,10 @@ pub async fn handle_event(
                 return Ok(json!({}));
             };
             order.remove(src_pos);
-            let target_pos = order.iter().position(|id| *id == target_eid).unwrap_or(order.len());
+            let target_pos = order
+                .iter()
+                .position(|id| *id == target_eid)
+                .unwrap_or(order.len());
             order.insert(target_pos, source_eid);
             chain_ops::reorder_chain(state.clone(), evt.channel_uuid, order)
                 .await
@@ -829,9 +844,7 @@ pub async fn handle_event(
         }
         "chain_bypass" => {
             let toggled_on = evt.value.as_bool().unwrap_or(true);
-            state
-                .set_chain_bypass(evt.channel_uuid, !toggled_on)
-                .await;
+            state.set_chain_bypass(evt.channel_uuid, !toggled_on).await;
         }
         "open" => {
             let effect_id: Uuid = rest.parse().map_err(|_| RpcError {
@@ -899,7 +912,10 @@ pub async fn handle_event(
         }
     }
 
-    let mutated = matches!(kind, "add" | "remove" | "bypass" | "chain_bypass" | "rack-row");
+    let mutated = matches!(
+        kind,
+        "add" | "remove" | "bypass" | "chain_bypass" | "rack-row"
+    );
     if mutated {
         if let Err(e) = persist_channel(state, &host, evt.channel_uuid).await {
             tracing::warn!(

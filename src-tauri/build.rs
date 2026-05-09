@@ -1,9 +1,8 @@
 fn main() {
     tauri_build::build();
 
-    let manifest_dir = std::path::PathBuf::from(
-        std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"),
-    );
+    let manifest_dir =
+        std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
     let workspace_root = manifest_dir.parent().expect("workspace root").to_path_buf();
 
     // Watch plugin source directories so `tauri dev` triggers a rebuild when
@@ -25,7 +24,7 @@ fn main() {
         for id in [
             "tideline-tones",
             "tideline-notifications",
-                "tideline-ptt",
+            "tideline-ptt",
             "tideline-effects",
         ] {
             let bin = target_dir.join(id);

@@ -23,7 +23,9 @@ pub fn handle_attach_data(
         return Err(MixRpcError::Forbidden(namespace.into()));
     }
     let uuid = Uuid::parse_str(mix_uuid).map_err(|_| MixRpcError::BadUuid(mix_uuid.into()))?;
-    let m = cfg.mix_by_uuid_mut(uuid).ok_or_else(|| MixRpcError::NotFound(mix_uuid.into()))?;
+    let m = cfg
+        .mix_by_uuid_mut(uuid)
+        .ok_or_else(|| MixRpcError::NotFound(mix_uuid.into()))?;
     m.plugin_data.insert(namespace.into(), value);
     Ok(())
 }
@@ -38,7 +40,9 @@ pub fn handle_detach_data(
         return Err(MixRpcError::Forbidden(namespace.into()));
     }
     let uuid = Uuid::parse_str(mix_uuid).map_err(|_| MixRpcError::BadUuid(mix_uuid.into()))?;
-    let m = cfg.mix_by_uuid_mut(uuid).ok_or_else(|| MixRpcError::NotFound(mix_uuid.into()))?;
+    let m = cfg
+        .mix_by_uuid_mut(uuid)
+        .ok_or_else(|| MixRpcError::NotFound(mix_uuid.into()))?;
     m.plugin_data.remove(namespace);
     Ok(())
 }

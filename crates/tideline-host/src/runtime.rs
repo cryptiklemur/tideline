@@ -1,11 +1,11 @@
+use crate::capabilities::CapabilitySet;
+use crate::logging::PluginLog;
+use crate::transport::JsonRpcTransport;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
-use tokio::sync::{Mutex, RwLock, mpsc};
-use crate::capabilities::CapabilitySet;
-use crate::logging::PluginLog;
-use crate::transport::JsonRpcTransport;
+use tokio::sync::{mpsc, Mutex, RwLock};
 
 #[derive(Debug, Clone)]
 pub enum PluginState {
@@ -78,8 +78,14 @@ impl PluginRuntime {
             let exit_code = {
                 let mut guard = runtime_for_wait.child.lock().await;
                 if let Some(child) = guard.as_mut() {
-                    child.wait().await.map(|s| s.code().unwrap_or(-1)).unwrap_or(-1)
-                } else { -1 }
+                    child
+                        .wait()
+                        .await
+                        .map(|s| s.code().unwrap_or(-1))
+                        .unwrap_or(-1)
+                } else {
+                    -1
+                }
             };
             *runtime_for_wait.state.write().await = PluginState::Stopped;
             let _ = runtime_for_wait.exit_tx.send(exit_code).await;
@@ -94,7 +100,9 @@ impl PluginRuntime {
 
     pub async fn shutdown(&self) {
         *self.state.write().await = PluginState::ShuttingDown;
-        if let Some(t) = self.transport.lock().await.take() { t.shutdown().await; }
+        if let Some(t) = self.transport.lock().await.take() {
+            t.shutdown().await;
+        }
         if let Some(mut child) = self.child.lock().await.take() {
             let _ = child.kill().await;
         }

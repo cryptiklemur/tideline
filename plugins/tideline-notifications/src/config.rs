@@ -1,15 +1,13 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct NotifConfig {
     #[serde(default = "default_enabled")]
     pub enabled: bool,
 }
 
-fn default_enabled() -> bool { false }
-
-impl Default for NotifConfig {
-    fn default() -> Self { Self { enabled: false } }
+fn default_enabled() -> bool {
+    false
 }
 
 impl NotifConfig {
@@ -22,22 +20,26 @@ impl NotifConfig {
 mod tests {
     use super::*;
 
-    #[test] fn default_is_disabled() {
+    #[test]
+    fn default_is_disabled() {
         assert!(!NotifConfig::default().enabled);
     }
 
-    #[test] fn missing_fields_use_defaults() {
+    #[test]
+    fn missing_fields_use_defaults() {
         let v: serde_json::Value = serde_json::from_str("{}").unwrap();
         assert_eq!(NotifConfig::from_json(&v), NotifConfig::default());
     }
 
-    #[test] fn explicit_disabled_round_trips() {
+    #[test]
+    fn explicit_disabled_round_trips() {
         let v: serde_json::Value = serde_json::from_str(r#"{"enabled":false}"#).unwrap();
         let c = NotifConfig::from_json(&v);
         assert!(!c.enabled);
     }
 
-    #[test] fn malformed_falls_back_to_default() {
+    #[test]
+    fn malformed_falls_back_to_default() {
         let v: serde_json::Value = serde_json::from_str(r#"{"enabled":"nope"}"#).unwrap();
         assert_eq!(NotifConfig::from_json(&v), NotifConfig::default());
     }

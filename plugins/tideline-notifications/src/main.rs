@@ -47,7 +47,10 @@ impl Plugin for NotifPlugin {
             error!(?e, "event_subscribe failed");
         }
         let cfg_now = self.cfg.lock().await.clone();
-        if let Err(e) = host.settings_section_render(SECTION_ID, render(&cfg_now)).await {
+        if let Err(e) = host
+            .settings_section_render(SECTION_ID, render(&cfg_now))
+            .await
+        {
             warn!(?e, "initial settings_section_render failed");
         }
         info!(plugin = PLUGIN_ID, "ready");
@@ -146,7 +149,10 @@ impl Plugin for NotifPlugin {
                         error!(?e, "config_namespace_set failed");
                     }
                 }
-                if let Err(e) = host.settings_section_render(SECTION_ID, render(&cfg_clone)).await {
+                if let Err(e) = host
+                    .settings_section_render(SECTION_ID, render(&cfg_clone))
+                    .await
+                {
                     error!(?e, "settings_section_render failed");
                 }
                 Ok(json!({}))

@@ -78,7 +78,8 @@ pub struct InputOverlayContribution {
     pub input_filter: InputFilter,
     pub tree: UiNode,
     #[serde(default)]
-    pub values_by_source: std::collections::HashMap<String, std::collections::HashMap<String, serde_json::Value>>,
+    pub values_by_source:
+        std::collections::HashMap<String, std::collections::HashMap<String, serde_json::Value>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

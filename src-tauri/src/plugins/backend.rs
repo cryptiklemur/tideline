@@ -80,10 +80,7 @@ impl HostBackend for TauriHostBackend {
         .map_err(|e| format!("list sources task join failed: {e}"))
     }
 
-    async fn config_namespace_get(
-        &self,
-        namespace: &str,
-    ) -> Result<serde_json::Value, String> {
+    async fn config_namespace_get(&self, namespace: &str) -> Result<serde_json::Value, String> {
         let namespace = namespace.to_string();
         tokio::task::spawn_blocking(move || {
             let cfg = tideline_core::config_io::load_config();
@@ -162,7 +159,9 @@ impl HostBackend for TauriHostBackend {
         // pipewire, nudge the debounced rebuild worker so its conf is
         // regenerated promptly. Independent of the rack_changed event bus
         // path; both converge on the same Notify.
-        if let Some(registry) = app_for_pw.try_state::<std::sync::Arc<tideline_host::PluginRegistry>>() {
+        if let Some(registry) =
+            app_for_pw.try_state::<std::sync::Arc<tideline_host::PluginRegistry>>()
+        {
             let contributors = registry
                 .plugins_with_capability(tideline_sdk::Capability::PipewireContribute)
                 .await;

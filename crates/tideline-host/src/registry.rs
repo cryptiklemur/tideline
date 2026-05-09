@@ -1,3 +1,18 @@
+use crate::capabilities::CapabilitySet;
+use crate::contributions::{
+    ChannelOverlayContribution, Contributions, IframeSurface, InputOverlayContribution,
+    KeybindActionContribution, SettingsSectionContribution, StatusPillContribution,
+    TrayItemContribution,
+};
+use crate::events::EventBus;
+use crate::iframe::IframeMessage;
+use crate::install::{self, InstallError, InstallPreview};
+use crate::logging::PluginLog;
+use crate::manifest;
+use crate::paths::{data_home, plugin_log_path, plugin_permissions_path};
+use crate::runtime::PluginRuntime;
+use crate::supervisor::{CrashDecision, CrashTracker};
+use crate::transport::TransportError;
 use std::collections::HashMap;
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -5,35 +20,30 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Instant;
 use thiserror::Error;
-use tokio::sync::{Mutex, RwLock, mpsc};
-use tideline_sdk::Capability;
 use tideline_sdk::types::Manifest;
-use crate::capabilities::CapabilitySet;
-use crate::contributions::{
-    ChannelOverlayContribution, Contributions, IframeSurface, InputOverlayContribution, KeybindActionContribution,
-    SettingsSectionContribution, StatusPillContribution, TrayItemContribution,
-};
-use crate::events::EventBus;
-use crate::iframe::IframeMessage;
-use crate::install::{self, InstallError, InstallPreview};
-use crate::logging::PluginLog;
-use crate::manifest;
-use crate::paths::{plugin_log_path, plugin_permissions_path, data_home};
-use crate::runtime::PluginRuntime;
-use crate::supervisor::{CrashDecision, CrashTracker};
-use crate::transport::TransportError;
+use tideline_sdk::Capability;
+use tokio::sync::{mpsc, Mutex, RwLock};
 
 #[derive(Debug, Error)]
 pub enum RegistryError {
-    #[error("install: {0}")] Install(#[from] InstallError),
-    #[error("manifest: {0}")] Manifest(#[from] crate::manifest::ManifestError),
-    #[error("io: {0}")] Io(#[from] std::io::Error),
-    #[error("plugin {0:?} not installed")] NotInstalled(String),
-    #[error("plugin {0:?} already running")] AlreadyRunning(String),
-    #[error("transport: {0}")] Transport(String),
-    #[error("plugin error: {0}")] PluginError(String),
-    #[error("invalid contribution payload: {0}")] InvalidContribution(String),
-    #[error("unknown contribution kind {0:?}")] UnknownContributionKind(String),
+    #[error("install: {0}")]
+    Install(#[from] InstallError),
+    #[error("manifest: {0}")]
+    Manifest(#[from] crate::manifest::ManifestError),
+    #[error("io: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("plugin {0:?} not installed")]
+    NotInstalled(String),
+    #[error("plugin {0:?} already running")]
+    AlreadyRunning(String),
+    #[error("transport: {0}")]
+    Transport(String),
+    #[error("plugin error: {0}")]
+    PluginError(String),
+    #[error("invalid contribution payload: {0}")]
+    InvalidContribution(String),
+    #[error("unknown contribution kind {0:?}")]
+    UnknownContributionKind(String),
 }
 
 pub enum ContribKind {
@@ -80,7 +90,9 @@ pub struct PluginRegistry {
 
 fn write_permissions(plugin_id: &str, granted: &[Capability]) -> std::io::Result<()> {
     let path = plugin_permissions_path(plugin_id);
-    if let Some(parent) = path.parent() { std::fs::create_dir_all(parent)?; }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     let file = tideline_sdk::types::PermissionsFile {
         plugin_id: plugin_id.to_string(),
         granted: granted.to_vec(),
@@ -129,9 +141,11 @@ impl PluginRegistry {
         Ok(install::inspect(source)?)
     }
 
-    pub async fn install(&self, preview: &InstallPreview, granted: &[Capability])
-        -> Result<Arc<InstalledPlugin>, RegistryError>
-    {
+    pub async fn install(
+        &self,
+        preview: &InstallPreview,
+        granted: &[Capability],
+    ) -> Result<Arc<InstalledPlugin>, RegistryError> {
         let dir = install::commit_install(preview, granted)?;
         write_permissions(&preview.manifest.plugin.id, granted)?;
         let plugin = Arc::new(InstalledPlugin {
@@ -141,7 +155,9 @@ impl PluginRegistry {
             crash_tracker: Mutex::new(CrashTracker::default()),
             runtime: Mutex::new(None),
         });
-        self.installed.write().await
+        self.installed
+            .write()
+            .await
             .insert(preview.manifest.plugin.id.clone(), plugin.clone());
         Ok(plugin)
     }
@@ -151,16 +167,22 @@ impl PluginRegistry {
             Some(p) => std::path::PathBuf::from(p),
             None => data_home().join("plugins"),
         };
-        if !root.exists() { return Ok(0); }
+        if !root.exists() {
+            return Ok(0);
+        }
         let mut count = 0;
         for entry in std::fs::read_dir(&root)? {
             let entry = entry?;
-            if !entry.file_type()?.is_dir() { continue; }
+            if !entry.file_type()?.is_dir() {
+                continue;
+            }
             let manifest_path = entry.path().join("tideline-plugin.toml");
-            if !manifest_path.exists() { continue; }
+            if !manifest_path.exists() {
+                continue;
+            }
             let m = manifest::load(&manifest_path)?;
-            let granted_caps = read_permissions(&m.plugin.id)
-                .unwrap_or_else(|| m.capabilities.required.clone());
+            let granted_caps =
+                read_permissions(&m.plugin.id).unwrap_or_else(|| m.capabilities.required.clone());
             let plugin = Arc::new(InstalledPlugin {
                 manifest: m.clone(),
                 install_dir: entry.path(),
@@ -168,20 +190,28 @@ impl PluginRegistry {
                 crash_tracker: Mutex::new(CrashTracker::default()),
                 runtime: Mutex::new(None),
             });
-            self.installed.write().await.insert(m.plugin.id.clone(), plugin);
+            self.installed
+                .write()
+                .await
+                .insert(m.plugin.id.clone(), plugin);
             count += 1;
         }
         Ok(count)
     }
 
-    pub fn start(self: &Arc<Self>, plugin_id: &str)
-        -> Pin<Box<dyn Future<Output = Result<Arc<PluginRuntime>, RegistryError>> + Send + '_>>
-    {
+    pub fn start(
+        self: &Arc<Self>,
+        plugin_id: &str,
+    ) -> Pin<Box<dyn Future<Output = Result<Arc<PluginRuntime>, RegistryError>> + Send + '_>> {
         let registry = self.clone();
         let plugin_id = plugin_id.to_string();
         Box::pin(async move {
-            let plugin = registry.installed.read().await
-                .get(&plugin_id).cloned()
+            let plugin = registry
+                .installed
+                .read()
+                .await
+                .get(&plugin_id)
+                .cloned()
                 .ok_or_else(|| RegistryError::NotInstalled(plugin_id.clone()))?;
             {
                 let guard = plugin.runtime.lock().await;
@@ -198,15 +228,22 @@ impl PluginRegistry {
                 plugin.granted.clone(),
                 log,
                 exit_tx,
-            ).await?;
+            )
+            .await?;
             *plugin.runtime.lock().await = Some(runtime.clone());
 
-            let mut event_rx = registry.bus.register_plugin(
-                &plugin_id,
-                plugin.manifest.contributes.publishes_topics.clone(),
-            ).await;
+            let mut event_rx = registry
+                .bus
+                .register_plugin(
+                    &plugin_id,
+                    plugin.manifest.contributes.publishes_topics.clone(),
+                )
+                .await;
 
-            let transport = runtime.transport().await.expect("transport present after spawn");
+            let transport = runtime
+                .transport()
+                .await
+                .expect("transport present after spawn");
             let mut requests = transport.take_requests().await;
             let backend = registry.backend.read().await.clone();
             let ctx = crate::dispatcher::HostContext {
@@ -220,7 +257,9 @@ impl PluginRegistry {
                 while let Some((req, ack)) = requests.recv().await {
                     let ctx = ctx.clone();
                     tokio::spawn(async move {
-                        let resp = match crate::dispatcher::dispatch(&ctx, &req.method, req.params).await {
+                        let resp = match crate::dispatcher::dispatch(&ctx, &req.method, req.params)
+                            .await
+                        {
                             Ok(v) => tideline_sdk::rpc::Response::ok(req.id, v),
                             Err(e) => tideline_sdk::rpc::Response::err(req.id, e),
                         };
@@ -232,10 +271,12 @@ impl PluginRegistry {
             let transport_for_events = transport.clone();
             tokio::spawn(async move {
                 while let Some(evt) = event_rx.recv().await {
-                    let _ = transport_for_events.notify(
-                        "host/event.fire",
-                        Some(serde_json::json!({"topic": evt.topic, "params": evt.params})),
-                    ).await;
+                    let _ = transport_for_events
+                        .notify(
+                            "host/event.fire",
+                            Some(serde_json::json!({"topic": evt.topic, "params": evt.params})),
+                        )
+                        .await;
                 }
             });
 
@@ -266,16 +307,25 @@ impl PluginRegistry {
 
     pub async fn stop(&self, plugin_id: &str) {
         if let Some(p) = self.installed.read().await.get(plugin_id).cloned() {
-            if let Some(rt) = p.runtime.lock().await.take() { rt.shutdown().await; }
+            if let Some(rt) = p.runtime.lock().await.take() {
+                rt.shutdown().await;
+            }
             self.bus.unregister_plugin(plugin_id).await;
         }
         self.evict_plugin_contributions(plugin_id).await;
     }
 
-    pub async fn revoke_capability(&self, plugin_id: &str, cap: Capability)
-        -> Result<bool, RegistryError>
-    {
-        let plugin = self.installed.read().await.get(plugin_id).cloned()
+    pub async fn revoke_capability(
+        &self,
+        plugin_id: &str,
+        cap: Capability,
+    ) -> Result<bool, RegistryError> {
+        let plugin = self
+            .installed
+            .read()
+            .await
+            .get(plugin_id)
+            .cloned()
             .ok_or_else(|| RegistryError::NotInstalled(plugin_id.into()))?;
         let removed = plugin.granted.write().await.revoke(cap);
         if removed {
@@ -283,30 +333,41 @@ impl PluginRegistry {
             write_permissions(plugin_id, &granted)?;
             if let Some(rt) = plugin.runtime.lock().await.as_ref() {
                 if let Some(t) = rt.transport().await {
-                    let _ = t.notify(
-                        "plugin/permissions.changed",
-                        Some(serde_json::json!({"granted": granted})),
-                    ).await;
+                    let _ = t
+                        .notify(
+                            "plugin/permissions.changed",
+                            Some(serde_json::json!({"granted": granted})),
+                        )
+                        .await;
                 }
             }
         }
         Ok(removed)
     }
 
-    pub async fn grant_capability(&self, plugin_id: &str, cap: Capability)
-        -> Result<(), RegistryError>
-    {
-        let plugin = self.installed.read().await.get(plugin_id).cloned()
+    pub async fn grant_capability(
+        &self,
+        plugin_id: &str,
+        cap: Capability,
+    ) -> Result<(), RegistryError> {
+        let plugin = self
+            .installed
+            .read()
+            .await
+            .get(plugin_id)
+            .cloned()
             .ok_or_else(|| RegistryError::NotInstalled(plugin_id.into()))?;
         plugin.granted.write().await.grant(cap);
         let granted = plugin.granted.read().await.as_vec();
         write_permissions(plugin_id, &granted)?;
         if let Some(rt) = plugin.runtime.lock().await.as_ref() {
             if let Some(t) = rt.transport().await {
-                let _ = t.notify(
-                    "plugin/permissions.changed",
-                    Some(serde_json::json!({"granted": granted})),
-                ).await;
+                let _ = t
+                    .notify(
+                        "plugin/permissions.changed",
+                        Some(serde_json::json!({"granted": granted})),
+                    )
+                    .await;
             }
         }
         Ok(())
@@ -348,10 +409,11 @@ impl PluginRegistry {
         self.iframe_tx.subscribe()
     }
 
-    pub fn subscribe_plugin_events(&self) -> tokio::sync::broadcast::Receiver<crate::events::Event> {
+    pub fn subscribe_plugin_events(
+        &self,
+    ) -> tokio::sync::broadcast::Receiver<crate::events::Event> {
         self.bus.subscribe_broadcast()
     }
-
 
     /// Publish a `host:*` event over the plugin event bus. Lets the host
     /// notify subscribed plugins about lifecycle events the host itself
@@ -399,7 +461,10 @@ impl PluginRegistry {
         mut payload: serde_json::Value,
     ) -> Result<(), RegistryError> {
         if let Some(obj) = payload.as_object_mut() {
-            obj.insert("plugin_id".into(), serde_json::Value::String(plugin_id.to_string()));
+            obj.insert(
+                "plugin_id".into(),
+                serde_json::Value::String(plugin_id.to_string()),
+            );
         } else {
             return Err(RegistryError::InvalidContribution(
                 "payload must be a JSON object".into(),
@@ -412,51 +477,90 @@ impl PluginRegistry {
                 ContribKind::SettingsSection => {
                     let c: SettingsSectionContribution = serde_json::from_value(payload)
                         .map_err(|e| RegistryError::InvalidContribution(e.to_string()))?;
-                    if let Some(slot) = entry.settings_sections.iter_mut()
+                    if let Some(slot) = entry
+                        .settings_sections
+                        .iter_mut()
                         .find(|x| x.surface_id == c.surface_id)
-                    { *slot = c; } else { entry.settings_sections.push(c); }
+                    {
+                        *slot = c;
+                    } else {
+                        entry.settings_sections.push(c);
+                    }
                 }
                 ContribKind::StatusPill => {
                     let c: StatusPillContribution = serde_json::from_value(payload)
                         .map_err(|e| RegistryError::InvalidContribution(e.to_string()))?;
-                    if let Some(slot) = entry.status_pills.iter_mut()
+                    if let Some(slot) = entry
+                        .status_pills
+                        .iter_mut()
                         .find(|x| x.surface_id == c.surface_id)
-                    { *slot = c; } else { entry.status_pills.push(c); }
+                    {
+                        *slot = c;
+                    } else {
+                        entry.status_pills.push(c);
+                    }
                 }
                 ContribKind::ChannelOverlay => {
                     let c: ChannelOverlayContribution = serde_json::from_value(payload)
                         .map_err(|e| RegistryError::InvalidContribution(e.to_string()))?;
-                    if let Some(slot) = entry.channel_overlays.iter_mut()
+                    if let Some(slot) = entry
+                        .channel_overlays
+                        .iter_mut()
                         .find(|x| x.surface_id == c.surface_id)
-                    { *slot = c; } else { entry.channel_overlays.push(c); }
+                    {
+                        *slot = c;
+                    } else {
+                        entry.channel_overlays.push(c);
+                    }
                 }
                 ContribKind::IframeSurface => {
                     let c: IframeSurface = serde_json::from_value(payload)
                         .map_err(|e| RegistryError::InvalidContribution(e.to_string()))?;
-                    if let Some(slot) = entry.iframe_surfaces.iter_mut()
+                    if let Some(slot) = entry
+                        .iframe_surfaces
+                        .iter_mut()
                         .find(|x| x.surface_id == c.surface_id)
-                    { *slot = c; } else { entry.iframe_surfaces.push(c); }
+                    {
+                        *slot = c;
+                    } else {
+                        entry.iframe_surfaces.push(c);
+                    }
                 }
                 ContribKind::TrayItem => {
                     let c: TrayItemContribution = serde_json::from_value(payload)
                         .map_err(|e| RegistryError::InvalidContribution(e.to_string()))?;
-                    if let Some(slot) = entry.tray_items.iter_mut()
-                        .find(|x| x.item_id == c.item_id)
-                    { *slot = c; } else { entry.tray_items.push(c); }
+                    if let Some(slot) = entry.tray_items.iter_mut().find(|x| x.item_id == c.item_id)
+                    {
+                        *slot = c;
+                    } else {
+                        entry.tray_items.push(c);
+                    }
                 }
                 ContribKind::KeybindAction => {
                     let c: KeybindActionContribution = serde_json::from_value(payload)
                         .map_err(|e| RegistryError::InvalidContribution(e.to_string()))?;
-                    if let Some(slot) = entry.keybind_actions.iter_mut()
+                    if let Some(slot) = entry
+                        .keybind_actions
+                        .iter_mut()
                         .find(|x| x.action_id == c.action_id)
-                    { *slot = c; } else { entry.keybind_actions.push(c); }
+                    {
+                        *slot = c;
+                    } else {
+                        entry.keybind_actions.push(c);
+                    }
                 }
                 ContribKind::InputOverlay => {
                     let c: InputOverlayContribution = serde_json::from_value(payload)
                         .map_err(|e| RegistryError::InvalidContribution(e.to_string()))?;
-                    if let Some(slot) = entry.input_overlays.iter_mut()
+                    if let Some(slot) = entry
+                        .input_overlays
+                        .iter_mut()
                         .find(|x| x.surface_id == c.surface_id)
-                    { *slot = c; } else { entry.input_overlays.push(c); }
+                    {
+                        *slot = c;
+                    } else {
+                        entry.input_overlays.push(c);
+                    }
                 }
             }
         }
@@ -474,7 +578,9 @@ impl PluginRegistry {
     ) -> Result<(), RegistryError> {
         {
             let mut map = self.plugin_contribs.write().await;
-            let Some(entry) = map.get_mut(plugin_id) else { return Ok(()) };
+            let Some(entry) = map.get_mut(plugin_id) else {
+                return Ok(());
+            };
             match kind {
                 ContribKind::SettingsSection => {
                     entry.settings_sections.retain(|x| x.surface_id != id);
@@ -509,11 +615,19 @@ impl PluginRegistry {
         surface_id: &str,
         tree: serde_json::Value,
     ) -> Result<(), RegistryError> {
-        tracing::info!("update_settings_section_tree: plugin_id={}, surface_id={}", plugin_id, surface_id);
+        tracing::info!(
+            "update_settings_section_tree: plugin_id={}, surface_id={}",
+            plugin_id,
+            surface_id
+        );
         {
             let mut map = self.plugin_contribs.write().await;
             if let Some(entry) = map.get_mut(plugin_id) {
-                if let Some(section) = entry.settings_sections.iter_mut().find(|x| x.surface_id == surface_id) {
+                if let Some(section) = entry
+                    .settings_sections
+                    .iter_mut()
+                    .find(|x| x.surface_id == surface_id)
+                {
                     tracing::info!("found section, updating tree");
                     section.tree = tree;
                 } else {
@@ -546,13 +660,25 @@ impl PluginRegistry {
             let map = self.plugin_contribs.read().await;
             let mut merged = Contributions::default();
             for entry in map.values() {
-                merged.settings_sections.extend(entry.settings_sections.iter().cloned());
-                merged.status_pills.extend(entry.status_pills.iter().cloned());
-                merged.channel_overlays.extend(entry.channel_overlays.iter().cloned());
-                merged.iframe_surfaces.extend(entry.iframe_surfaces.iter().cloned());
+                merged
+                    .settings_sections
+                    .extend(entry.settings_sections.iter().cloned());
+                merged
+                    .status_pills
+                    .extend(entry.status_pills.iter().cloned());
+                merged
+                    .channel_overlays
+                    .extend(entry.channel_overlays.iter().cloned());
+                merged
+                    .iframe_surfaces
+                    .extend(entry.iframe_surfaces.iter().cloned());
                 merged.tray_items.extend(entry.tray_items.iter().cloned());
-                merged.keybind_actions.extend(entry.keybind_actions.iter().cloned());
-                merged.input_overlays.extend(entry.input_overlays.iter().cloned());
+                merged
+                    .keybind_actions
+                    .extend(entry.keybind_actions.iter().cloned());
+                merged
+                    .input_overlays
+                    .extend(entry.input_overlays.iter().cloned());
             }
             merged
         };
@@ -568,18 +694,23 @@ impl PluginRegistry {
         if let Some(handler) = self.test_handlers.read().await.get(plugin_id).cloned() {
             return Ok(handler(method, &params));
         }
-        let runtime = self.runtime(plugin_id).await
+        let runtime = self
+            .runtime(plugin_id)
+            .await
             .ok_or_else(|| RegistryError::NotInstalled(plugin_id.into()))?;
-        let transport = runtime.transport().await
+        let transport = runtime
+            .transport()
+            .await
             .ok_or_else(|| RegistryError::NotInstalled(plugin_id.into()))?;
         match transport
             .call(method, Some(params), std::time::Duration::from_secs(30))
             .await
         {
             Ok(value) => Ok(value),
-            Err(TransportError::Rpc(err)) => {
-                Err(RegistryError::PluginError(format!("{}: {}", err.code, err.message)))
-            }
+            Err(TransportError::Rpc(err)) => Err(RegistryError::PluginError(format!(
+                "{}: {}",
+                err.code, err.message
+            ))),
             Err(e) => Err(RegistryError::Transport(e.to_string())),
         }
     }
@@ -594,9 +725,13 @@ impl PluginRegistry {
             let _ = handler(method, &params);
             return Ok(());
         }
-        let runtime = self.runtime(plugin_id).await
+        let runtime = self
+            .runtime(plugin_id)
+            .await
             .ok_or_else(|| RegistryError::NotInstalled(plugin_id.into()))?;
-        let transport = runtime.transport().await
+        let transport = runtime
+            .transport()
+            .await
             .ok_or_else(|| RegistryError::NotInstalled(plugin_id.into()))?;
         transport
             .notify(method, Some(params))
@@ -633,8 +768,7 @@ mod tests {
         std::env::set_var("XDG_CONFIG_HOME", cfg.path());
         let reg = Arc::new(PluginRegistry::new());
         let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-        let fixture = PathBuf::from(manifest_dir)
-            .join("tests/fixtures/tideline-test-plugin");
+        let fixture = PathBuf::from(manifest_dir).join("tests/fixtures/tideline-test-plugin");
         let preview = reg.inspect(&fixture).unwrap();
         let granted = preview.declared_required.clone();
         reg.install(&preview, &granted).await.unwrap();
@@ -648,7 +782,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let plugin_dir = dir.path().join("io.test");
         std::fs::create_dir_all(&plugin_dir).unwrap();
-        std::fs::write(plugin_dir.join("tideline-plugin.toml"), r#"
+        std::fs::write(
+            plugin_dir.join("tideline-plugin.toml"),
+            r#"
 [plugin]
 schema = 1
 id = "io.test"
@@ -664,7 +800,9 @@ exec = "bin/test"
 
 [capabilities]
 required = []
-"#).unwrap();
+"#,
+        )
+        .unwrap();
         std::env::set_var("TIDELINE_DEV_PLUGINS_DIR", dir.path());
         let reg = PluginRegistry::new();
         let count = reg.discover().await.unwrap();
@@ -672,4 +810,3 @@ required = []
         assert_eq!(count, 1);
     }
 }
-

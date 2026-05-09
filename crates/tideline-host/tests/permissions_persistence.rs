@@ -1,11 +1,10 @@
 use std::path::PathBuf;
 use std::sync::Arc;
-use tideline_host::PluginRegistry;
 use tideline_host::paths::plugin_permissions_path;
+use tideline_host::PluginRegistry;
 
 fn fixture() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/tideline-test-plugin")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/tideline-test-plugin")
 }
 
 #[tokio::test]
@@ -27,7 +26,11 @@ async fn install_writes_permissions_file_and_revoke_updates_it() {
     assert!(raw.contains("channel.read"));
 
     reg.revoke_capability("io.tideline.test", tideline_sdk::Capability::ChannelRead)
-        .await.unwrap();
+        .await
+        .unwrap();
     let raw2 = std::fs::read_to_string(&perms_path).unwrap();
-    assert!(!raw2.contains("channel.read"), "channel.read should be removed");
+    assert!(
+        !raw2.contains("channel.read"),
+        "channel.read should be removed"
+    );
 }

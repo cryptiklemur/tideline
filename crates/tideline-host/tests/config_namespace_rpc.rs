@@ -1,11 +1,16 @@
 use serde_json::json;
-use tideline_host::rpc::config::{NamespaceStore, handle_namespace_get, handle_namespace_set};
+use tideline_host::rpc::config::{handle_namespace_get, handle_namespace_set, NamespaceStore};
 
 #[test]
 fn set_then_get_roundtrips_within_namespace() {
     let mut store = NamespaceStore::default();
     let plugin_id = "io.tideline.silence";
-    let res = handle_namespace_set(plugin_id, "io.tideline.silence", json!({"threshold": -40}), &mut store);
+    let res = handle_namespace_set(
+        plugin_id,
+        "io.tideline.silence",
+        json!({"threshold": -40}),
+        &mut store,
+    );
     assert!(res.is_ok());
     let got = handle_namespace_get(plugin_id, "io.tideline.silence", &store).unwrap();
     assert_eq!(got, json!({"threshold": -40}));

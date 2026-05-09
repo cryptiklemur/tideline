@@ -59,11 +59,7 @@ fn suil_init_once() {
         // SAFETY: suil_init mutates argc/argv pointers in-place but we hand it
         // empty stubs; it does not retain them past the call.
         unsafe {
-            suil_sys::suil_init(
-                &mut argc,
-                &mut argv,
-                suil_sys::SuilArg_SUIL_ARG_NONE,
-            );
+            suil_sys::suil_init(&mut argc, &mut argv, suil_sys::SuilArg_SUIL_ARG_NONE);
         }
     });
 }
@@ -76,10 +72,7 @@ pub(super) fn open(
     suil_init_once();
 
     let lilv_plugin = plugin.plugin_handle.raw().clone();
-    let world_node_x11ui = plugin
-        .world
-        .raw()
-        .new_uri(LV2_UI_X11_UI);
+    let world_node_x11ui = plugin.world.raw().new_uri(LV2_UI_X11_UI);
 
     let uis = lilv_plugin.uis().context("plugin has no UIs")?;
     let chosen = uis
@@ -135,14 +128,7 @@ pub(super) fn open(
     });
     let controller_ptr = Box::into_raw(controller_box);
 
-    let host = unsafe {
-        suil_sys::suil_host_new(
-            Some(write_func),
-            Some(index_func),
-            None,
-            None,
-        )
-    };
+    let host = unsafe { suil_sys::suil_host_new(Some(write_func), Some(index_func), None, None) };
     if host.is_null() {
         unsafe {
             drop(Box::from_raw(controller_ptr));
@@ -174,11 +160,7 @@ pub(super) fn open(
     // extension_data, worker) directly via the LV2_Handle. rnnoise and
     // other tightly-coupled DSP+UI plugins refuse to instantiate without it.
     let instance_access_uri = CString::new(LV2_INSTANCE_ACCESS).unwrap();
-    let instance_handle: *mut c_void = plugin
-        .instance
-        .raw()
-        .instance()
-        .handle();
+    let instance_handle: *mut c_void = plugin.instance.raw().instance().handle();
     let instance_access_feature = LV2Feature {
         uri: instance_access_uri.as_ptr(),
         data: instance_handle,
@@ -249,9 +231,8 @@ pub(super) fn open(
     }
 
     let idle_iface_c = CString::new(LV2_UI_IDLE_INTERFACE).unwrap();
-    let idle_iface_raw = unsafe {
-        suil_sys::suil_instance_extension_data(instance, idle_iface_c.as_ptr())
-    };
+    let idle_iface_raw =
+        unsafe { suil_sys::suil_instance_extension_data(instance, idle_iface_c.as_ptr()) };
     let idle_iface = if idle_iface_raw.is_null() {
         None
     } else {
@@ -332,12 +313,7 @@ unsafe extern "C" fn write_func(
         } else {
             0
         };
-        tracing::debug!(
-            port_index,
-            buffer_size,
-            type_urid,
-            "ui→plugin atom write"
-        );
+        tracing::debug!(port_index, buffer_size, type_urid, "ui→plugin atom write");
         match tx.try_send(UiToPluginAtom {
             port_index,
             data: bytes.to_vec(),
@@ -356,10 +332,7 @@ unsafe extern "C" fn write_func(
     );
 }
 
-unsafe extern "C" fn index_func(
-    _controller: *mut c_void,
-    _port_symbol: *const c_char,
-) -> u32 {
+unsafe extern "C" fn index_func(_controller: *mut c_void, _port_symbol: *const c_char) -> u32 {
     // Not implemented yet. Suil only calls this for symbol→index lookups
     // that the UI explicitly requests; most LV2 UIs use port indices.
     u32::MAX

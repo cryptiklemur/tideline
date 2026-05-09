@@ -101,13 +101,19 @@ impl EffectsState {
     /// see an empty catalog and fail to attach every persisted effect.
     pub async fn wait_for_catalog(&self) {
         loop {
-            if self.catalog_ready.load(std::sync::atomic::Ordering::Acquire) {
+            if self
+                .catalog_ready
+                .load(std::sync::atomic::Ordering::Acquire)
+            {
                 return;
             }
             let notified = self.catalog_ready_notify.notified();
             tokio::pin!(notified);
             notified.as_mut().enable();
-            if self.catalog_ready.load(std::sync::atomic::Ordering::Acquire) {
+            if self
+                .catalog_ready
+                .load(std::sync::atomic::Ordering::Acquire)
+            {
                 return;
             }
             notified.await;
@@ -182,12 +188,7 @@ impl EffectsState {
             .collect()
     }
 
-    pub async fn set_effect_bypassed(
-        &self,
-        channel_id: Uuid,
-        effect_id: Uuid,
-        bypassed: bool,
-    ) {
+    pub async fn set_effect_bypassed(&self, channel_id: Uuid, effect_id: Uuid, bypassed: bool) {
         {
             let mut effects = self.effects.lock().await;
             if let Some(slot) = effects.get_mut(&(channel_id, effect_id)) {
@@ -200,12 +201,7 @@ impl EffectsState {
         crate::persist::save_chains_to_disk(self).await;
     }
 
-    pub async fn set_effect_state_b64(
-        &self,
-        channel_id: Uuid,
-        effect_id: Uuid,
-        b64: String,
-    ) {
+    pub async fn set_effect_state_b64(&self, channel_id: Uuid, effect_id: Uuid, b64: String) {
         {
             let mut effects = self.effects.lock().await;
             if let Some(slot) = effects.get_mut(&(channel_id, effect_id)) {
@@ -234,9 +230,13 @@ impl EffectsState {
         crate::persist::save_chains_to_disk(self).await;
     }
 
-
     pub async fn get_lowcut(&self, channel_id: Uuid) -> bool {
-        self.lowcut.lock().await.get(&channel_id).copied().unwrap_or(false)
+        self.lowcut
+            .lock()
+            .await
+            .get(&channel_id)
+            .copied()
+            .unwrap_or(false)
     }
 
     pub async fn set_lowcut(&self, channel_id: Uuid, enabled: bool) {
@@ -248,7 +248,12 @@ impl EffectsState {
     }
 
     pub async fn get_clipguard(&self, channel_id: Uuid) -> bool {
-        self.clipguard.lock().await.get(&channel_id).copied().unwrap_or(false)
+        self.clipguard
+            .lock()
+            .await
+            .get(&channel_id)
+            .copied()
+            .unwrap_or(false)
     }
 
     pub async fn set_clipguard(&self, channel_id: Uuid, enabled: bool) {
@@ -260,7 +265,12 @@ impl EffectsState {
     }
 
     pub async fn get_input_gain(&self, channel_id: Uuid) -> f32 {
-        self.input_gain.lock().await.get(&channel_id).copied().unwrap_or(1.0)
+        self.input_gain
+            .lock()
+            .await
+            .get(&channel_id)
+            .copied()
+            .unwrap_or(1.0)
     }
 
     pub async fn set_input_gain(&self, channel_id: Uuid, amp: f32) {
@@ -299,36 +309,45 @@ impl EffectsState {
             );
         }
         for (channel_id, bypassed) in chain_bypass {
-            channels.entry(channel_id).or_insert(crate::persist::PersistedChannel {
-                bypassed,
-                lowcut: lowcut.get(&channel_id).copied().unwrap_or(false),
-                clipguard: clipguard.get(&channel_id).copied().unwrap_or(false),
-                input_gain: input_gain.get(&channel_id).copied().unwrap_or(1.0),
-                effects: Vec::new(),
-            });
+            channels
+                .entry(channel_id)
+                .or_insert(crate::persist::PersistedChannel {
+                    bypassed,
+                    lowcut: lowcut.get(&channel_id).copied().unwrap_or(false),
+                    clipguard: clipguard.get(&channel_id).copied().unwrap_or(false),
+                    input_gain: input_gain.get(&channel_id).copied().unwrap_or(1.0),
+                    effects: Vec::new(),
+                });
         }
         // Channels that have only lowcut/clipguard/input_gain set without
         // any chain bypass entry still need persistence — otherwise the
         // toggle/value is lost on restart.
         for (channel_id, _) in lowcut.iter().chain(clipguard.iter()) {
-            channels.entry(*channel_id).or_insert_with(|| crate::persist::PersistedChannel {
-                bypassed: false,
-                lowcut: lowcut.get(channel_id).copied().unwrap_or(false),
-                clipguard: clipguard.get(channel_id).copied().unwrap_or(false),
-                input_gain: input_gain.get(channel_id).copied().unwrap_or(1.0),
-                effects: Vec::new(),
-            });
+            channels
+                .entry(*channel_id)
+                .or_insert_with(|| crate::persist::PersistedChannel {
+                    bypassed: false,
+                    lowcut: lowcut.get(channel_id).copied().unwrap_or(false),
+                    clipguard: clipguard.get(channel_id).copied().unwrap_or(false),
+                    input_gain: input_gain.get(channel_id).copied().unwrap_or(1.0),
+                    effects: Vec::new(),
+                });
         }
         for channel_id in input_gain.keys() {
-            channels.entry(*channel_id).or_insert_with(|| crate::persist::PersistedChannel {
-                bypassed: false,
-                lowcut: lowcut.get(channel_id).copied().unwrap_or(false),
-                clipguard: clipguard.get(channel_id).copied().unwrap_or(false),
-                input_gain: input_gain.get(channel_id).copied().unwrap_or(1.0),
-                effects: Vec::new(),
-            });
+            channels
+                .entry(*channel_id)
+                .or_insert_with(|| crate::persist::PersistedChannel {
+                    bypassed: false,
+                    lowcut: lowcut.get(channel_id).copied().unwrap_or(false),
+                    clipguard: clipguard.get(channel_id).copied().unwrap_or(false),
+                    input_gain: input_gain.get(channel_id).copied().unwrap_or(1.0),
+                    effects: Vec::new(),
+                });
         }
-        crate::persist::PersistedChains { version: 2, channels }
+        crate::persist::PersistedChains {
+            version: 2,
+            channels,
+        }
     }
 
     pub async fn clear_chain_state(&self) {
@@ -372,7 +391,11 @@ pub async fn apply_persisted_chains(
 ) {
     let total_chains = persisted.channels.len();
     let total_effects: usize = persisted.channels.values().map(|c| c.effects.len()).sum();
-    tracing::info!(total_chains, total_effects, "apply_persisted_chains: starting");
+    tracing::info!(
+        total_chains,
+        total_effects,
+        "apply_persisted_chains: starting"
+    );
     state
         .suppress_save
         .store(true, std::sync::atomic::Ordering::Relaxed);
@@ -476,12 +499,8 @@ pub async fn recreate_engine_from_state(state: Arc<EffectsState>) {
                 }
             };
             let state_blob = crate::chain_ops::decode_state(&effect.state_b64);
-            if let Err(e) = engine.add_plugin(
-                *channel_id,
-                effect.id,
-                &info,
-                state_blob.as_deref(),
-            ) {
+            if let Err(e) = engine.add_plugin(*channel_id, effect.id, &info, state_blob.as_deref())
+            {
                 tracing::warn!(error = %e, ?channel_id, ?effect.id, "recreate: add_plugin failed");
                 continue;
             }

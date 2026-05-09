@@ -1,5 +1,5 @@
-use tideline_host::PluginRegistry;
 use tideline_host::contributions::{Contributions, TrayItemContribution};
+use tideline_host::PluginRegistry;
 
 #[tokio::test]
 async fn contributions_carry_tray_items_sorted_by_priority() {

@@ -27,7 +27,8 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    #[test] fn renders_one_toggle_with_current_value() {
+    #[test]
+    fn renders_one_toggle_with_current_value() {
         let cfg = NotifConfig { enabled: false };
         let v = serde_json::to_value(render(&cfg)).unwrap();
         assert_eq!(v["kind"], "section");
@@ -37,7 +38,8 @@ mod tests {
         assert_eq!(v["children"][0]["value"], json!(false));
     }
 
-    #[test] fn renders_default_enabled_false() {
+    #[test]
+    fn renders_default_enabled_false() {
         let v = serde_json::to_value(render(&NotifConfig::default())).unwrap();
         assert_eq!(v["children"][0]["value"], json!(false));
     }
