@@ -40,4 +40,4 @@ pnpm tauri dev
 
 ## License
 
-MIT. See `LICENSE` (forthcoming — drop a `LICENSE` file before depending on this).
+MIT. See [LICENSE](LICENSE).
