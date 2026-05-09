@@ -39,6 +39,8 @@ jobs:
             libxcb-icccm4-dev \
             libxcb-keysyms1-dev \
             libxcb-shape0-dev \
+            libasound2-dev \
+            libjack-jackd2-dev \
             pkg-config
 
       - uses: dtolnay/rust-toolchain@stable

@@ -33,6 +33,16 @@ new = re.sub(r'(?m)^(version\s*=\s*)"[^"]*"', f'\\1"{version}"', text, count=1)
 path.write_text(new)
 PY
 
+echo "[release-prepare] building plugin binaries (release)"
+# src-tauri's bundled-plugins feature include_bytes!'s these into the main
+# binary, so they have to exist at target/release/<id> before tauri build runs.
+# build.rs doesn't compile them — it only declares rerun deps.
+cargo build --release \
+  -p tideline-tones \
+  -p tideline-notifications \
+  -p tideline-ptt \
+  -p tideline-effects
+
 echo "[release-prepare] building tauri bundles"
 # tauri build runs cargo, which will refresh Cargo.lock with the new version
 # automatically — no separate `cargo update` needed.
