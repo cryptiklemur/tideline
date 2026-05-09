@@ -2330,7 +2330,7 @@ pub fn run() {
         config: Mutex::new(cfg),
     };
 
-    let mut builder = tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .register_uri_scheme_protocol("tideline-plugin", |ctx, req| {
             plugins::handle_request(ctx, req)
         })
@@ -2338,9 +2338,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init());
 
     #[cfg(debug_assertions)]
-    {
-        builder = builder.plugin(tauri_plugin_pilot::init());
-    }
+    let builder = builder.plugin(tauri_plugin_pilot::init());
 
     builder
         .plugin(
