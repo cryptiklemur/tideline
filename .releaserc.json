@@ -10,7 +10,8 @@
     [
       "@semantic-release/exec",
       {
-        "prepareCmd": "bash scripts/release-prepare.sh ${nextRelease.version}"
+        "prepareCmd": "bash scripts/release-prepare.sh ${nextRelease.version}",
+        "successCmd": "echo ${nextRelease.version} > .release-version"
       }
     ],
     [

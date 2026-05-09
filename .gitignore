@@ -34,3 +34,6 @@ plugins/*/bin/
 
 # LV2 plugin user-state dumps (LSP plugins drop these alongside the host)
 plugins/tideline-effects/*.cfg
+
+# semantic-release version handoff (CI only)
+.release-version

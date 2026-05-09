@@ -1,0 +1,45 @@
+# Maintainer: Aaron Scherer <aaron@cryptiklemur.com>
+pkgname=tideline-bin
+_appname=tideline
+pkgver=__VERSION__
+pkgrel=1
+pkgdesc='Linux audio control center (Wave Link-style mixer with LV2 FX hosting)'
+arch=('x86_64')
+url='https://github.com/cryptiklemur/tideline'
+license=('MIT')
+depends=(
+  'webkit2gtk-4.1'
+  'gtk3'
+  'libayatana-appindicator'
+  'librsvg'
+  'libsoup3'
+  'lilv'
+  'suil'
+  'pipewire'
+  'alsa-lib'
+  'jack2'
+)
+provides=('tideline')
+conflicts=('tideline')
+source=("https://github.com/cryptiklemur/tideline/releases/download/v${pkgver}/Tideline_${pkgver}_amd64.deb")
+sha256sums=('SKIP')
+options=('!strip')
+
+package() {
+  cd "$srcdir"
+  ar x "Tideline_${pkgver}_amd64.deb"
+  if [ -f data.tar.gz ]; then
+    tar -xzf data.tar.gz -C "$pkgdir"
+  elif [ -f data.tar.xz ]; then
+    tar -xJf data.tar.xz -C "$pkgdir"
+  elif [ -f data.tar.zst ]; then
+    tar --use-compress-program=unzstd -xf data.tar.zst -C "$pkgdir"
+  else
+    echo "no data.tar.* in deb" >&2
+    exit 1
+  fi
+
+  install -Dm644 /dev/stdin "$pkgdir/usr/share/licenses/$pkgname/LICENSE" <<'EOF'
+See https://github.com/cryptiklemur/tideline for full MIT license text.
+EOF
+}
