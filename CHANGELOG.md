@@ -1,3 +1,10 @@
+# [1.1.0](https://github.com/cryptiklemur/tideline/compare/v1.0.1...v1.1.0) (2026-05-11)
+
+
+### Features
+
+* **ui:** tray mute toggles + hide channels/sinks ([a04b01b](https://github.com/cryptiklemur/tideline/commit/a04b01b27e6a3be3dcd7ea358de057d320a04f5d))
+
 ## [1.0.1](https://github.com/cryptiklemur/tideline/compare/v1.0.0...v1.0.1) (2026-05-09)
 
 
