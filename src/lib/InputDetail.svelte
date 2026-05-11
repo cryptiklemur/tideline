@@ -22,12 +22,13 @@ interface Props {
     onAddSource?: (src: string) => void;
     onRemoveSource?: (src: string) => void;
     onDelete?: () => void;
+    onHide?: () => void;
 }
 
 let {
     channelUuid, name, kind, sinkName, physicalSource, meterSource,
     sources = [],
-    onAddSource, onRemoveSource, onDelete,
+    onAddSource, onRemoveSource, onDelete, onHide,
 }: Props = $props();
 
 const EFFECTS_PLUGIN_ID = 'tideline-effects';
@@ -439,6 +440,17 @@ function requestDelete() {
             aria-pressed={muted}
             onclick={toggleMute}
         >{muted ? 'MUTED' : 'MUTE'}</button>
+
+        {#if onHide}
+            <button
+                class="flex items-center justify-center gap-1.5 px-4 py-2.5 border rounded-md text-[10px] font-bold tracking-wider uppercase cursor-pointer transition-colors bg-transparent border-base-content/15 text-base-content/55 hover:bg-warning hover:text-warning-content hover:border-warning"
+                onclick={onHide}
+                title="Hide this input from the UI and tray (unhide in Settings)"
+            >
+                <Icon name="close" size={11} />
+                Hide input
+            </button>
+        {/if}
 
         {#if onDelete}
             <button

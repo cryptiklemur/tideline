@@ -8,9 +8,10 @@ import type { CardControl } from './types';
 interface Props {
     sinkName: string;
     description: string;
+    onHide?: () => void;
 }
 
-let { sinkName, description }: Props = $props();
+let { sinkName, description, onHide }: Props = $props();
 
 let vol = $state(100);
 let muted = $state(false);
@@ -277,5 +278,14 @@ async function toggleControlMute(controlName: string) {
             aria-pressed={muted}
             onclick={toggleMute}
         >{muted ? 'MUTED' : 'MUTE'}</button>
+        {#if onHide}
+            <button
+                class="flex items-center justify-center gap-1.5 px-4 py-2.5 border rounded-md text-[10px] font-bold tracking-wider uppercase cursor-pointer transition-colors bg-transparent border-base-content/15 text-base-content/55 hover:bg-warning hover:text-warning-content hover:border-warning"
+                onclick={onHide}
+                title="Hide this output from the UI and tray (unhide in Settings)"
+            >
+                Hide output
+            </button>
+        {/if}
     </div>
 </div>

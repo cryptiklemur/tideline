@@ -61,6 +61,8 @@ pub struct ChannelCfg {
     pub icon: String,
     #[serde(default)]
     pub plugin_data: HashMap<String, Value>,
+    #[serde(default)]
+    pub hidden: bool,
 }
 
 impl ChannelCfg {
@@ -76,6 +78,7 @@ impl ChannelCfg {
             physical_source: String::new(),
             icon: String::new(),
             plugin_data: HashMap::new(),
+            hidden: false,
         }
     }
 }
@@ -108,6 +111,8 @@ pub struct AppConfig {
     pub keybinds: HashMap<String, KeybindAction>,
     #[serde(default)]
     pub plugin_data: HashMap<String, Value>,
+    #[serde(default)]
+    pub hidden_sinks: Vec<String>,
 }
 
 impl AppConfig {

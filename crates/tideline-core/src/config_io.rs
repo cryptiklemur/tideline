@@ -56,6 +56,7 @@ pub fn default_config() -> AppConfig {
         ],
         keybinds: HashMap::new(),
         plugin_data: HashMap::new(),
+        hidden_sinks: Vec::new(),
     }
 }
 

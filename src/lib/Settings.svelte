@@ -20,7 +20,7 @@ interface Props {
 
 let { open = $bindable(), config, outputs, onSetKeybind, onClearKeybind, onConfigUpdate, onClose }: Props = $props();
 
-type BuiltinSectionId = 'general' | 'appearance' | 'keybinds' | 'devices';
+type BuiltinSectionId = 'general' | 'appearance' | 'keybinds' | 'devices' | 'hidden';
 type ActiveSection =
     | { kind: BuiltinSectionId }
     | { kind: 'plugin'; plugin_id: string; surface_id: string };
@@ -29,6 +29,7 @@ const SECTIONS: { id: BuiltinSectionId; label: string; icon: IconName; hint: str
     { id: 'appearance', label: 'Appearance', icon: 'palette', hint: 'Theme and visual preferences.' },
     { id: 'keybinds', label: 'Keybinds', icon: 'keyboard', hint: 'Global mute shortcuts.' },
     { id: 'devices', label: 'Devices', icon: 'cable', hint: 'Detected PipeWire sinks.' },
+    { id: 'hidden', label: 'Hidden', icon: 'package-open', hint: 'Re-show hidden inputs and outputs.' },
 ];
 
 let active = $state<ActiveSection>({ kind: 'general' });
@@ -405,6 +406,102 @@ let outputCount = $derived(config.channels.filter(c => (c.kind ?? 'output') === 
                         {/each}
                     </ul>
                 {/if}
+            {:else if active.kind === 'hidden'}
+                <header class="flex flex-col gap-1 mb-4">
+                    <h3 class="text-base font-semibold m-0">Hidden</h3>
+                    <p class="text-sm text-base-content/55 m-0 leading-snug">Inputs and outputs you've hidden from the UI and tray.</p>
+                </header>
+
+                {@const hiddenChannels = config.channels.filter(c => c.hidden)}
+                {@const hiddenSinkNames = config.hidden_sinks ?? []}
+                {@const hiddenSinks = outputs.filter(o => hiddenSinkNames.includes(o.name))}
+                {@const hiddenSinksMissing = hiddenSinkNames.filter(n => !outputs.some(o => o.name === n))}
+
+                <section class="flex flex-col gap-2 mb-6">
+                    <div class="flex items-center gap-2 px-2.5 mb-1 text-xs text-base-content/55">
+                        <Icon name="mic-vocal" size={12} />
+                        <span>Hidden inputs</span>
+                    </div>
+                    {#if hiddenChannels.length === 0}
+                        <p class="text-sm text-base-content/45 m-0 leading-snug px-2.5">Nothing hidden.</p>
+                    {:else}
+                        <ul class="list bg-base-100 border border-base-content/10 rounded-md">
+                            {#each hiddenChannels as c (c.name)}
+                                <li class="list-row flex items-center justify-between gap-2 py-2 px-3">
+                                    <div class="flex flex-col min-w-0">
+                                        <span class="text-sm truncate">{c.name}</span>
+                                        <span class="font-mono text-xs text-base-content/55 truncate">{c.kind === 'physical_input' ? 'Hardware mic' : 'Virtual input'}</span>
+                                    </div>
+                                    <button
+                                        class="px-3 py-1 border rounded-md text-[10px] font-bold tracking-wider uppercase cursor-pointer transition-colors bg-transparent border-base-content/15 text-base-content/70 hover:bg-primary hover:text-primary-content hover:border-primary"
+                                        onclick={async () => {
+                                            try {
+                                                await invoke('set_channel_hidden', { name: c.name, hidden: false });
+                                                onConfigUpdate({
+                                                    ...config,
+                                                    channels: config.channels.map(x => x.name === c.name ? { ...x, hidden: false } : x),
+                                                });
+                                            } catch (_) {}
+                                        }}
+                                    >Show</button>
+                                </li>
+                            {/each}
+                        </ul>
+                    {/if}
+                </section>
+
+                <section class="flex flex-col gap-2">
+                    <div class="flex items-center gap-2 px-2.5 mb-1 text-xs text-base-content/55">
+                        <Icon name="volume-up" size={12} />
+                        <span>Hidden outputs</span>
+                    </div>
+                    {#if hiddenSinks.length === 0 && hiddenSinksMissing.length === 0}
+                        <p class="text-sm text-base-content/45 m-0 leading-snug px-2.5">Nothing hidden.</p>
+                    {:else}
+                        <ul class="list bg-base-100 border border-base-content/10 rounded-md">
+                            {#each hiddenSinks as s (s.name)}
+                                <li class="list-row flex items-center justify-between gap-2 py-2 px-3">
+                                    <div class="flex flex-col min-w-0">
+                                        <span class="text-sm truncate">{s.description}</span>
+                                        <span class="font-mono text-xs text-base-content/55 truncate">{s.name}</span>
+                                    </div>
+                                    <button
+                                        class="px-3 py-1 border rounded-md text-[10px] font-bold tracking-wider uppercase cursor-pointer transition-colors bg-transparent border-base-content/15 text-base-content/70 hover:bg-primary hover:text-primary-content hover:border-primary"
+                                        onclick={async () => {
+                                            try {
+                                                await invoke('set_sink_hidden', { name: s.name, hidden: false });
+                                                onConfigUpdate({
+                                                    ...config,
+                                                    hidden_sinks: (config.hidden_sinks ?? []).filter(n => n !== s.name),
+                                                });
+                                            } catch (_) {}
+                                        }}
+                                    >Show</button>
+                                </li>
+                            {/each}
+                            {#each hiddenSinksMissing as name (name)}
+                                <li class="list-row flex items-center justify-between gap-2 py-2 px-3 opacity-70">
+                                    <div class="flex flex-col min-w-0">
+                                        <span class="text-sm truncate italic">Disconnected</span>
+                                        <span class="font-mono text-xs text-base-content/55 truncate">{name}</span>
+                                    </div>
+                                    <button
+                                        class="px-3 py-1 border rounded-md text-[10px] font-bold tracking-wider uppercase cursor-pointer transition-colors bg-transparent border-base-content/15 text-base-content/70 hover:bg-primary hover:text-primary-content hover:border-primary"
+                                        onclick={async () => {
+                                            try {
+                                                await invoke('set_sink_hidden', { name, hidden: false });
+                                                onConfigUpdate({
+                                                    ...config,
+                                                    hidden_sinks: (config.hidden_sinks ?? []).filter(n => n !== name),
+                                                });
+                                            } catch (_) {}
+                                        }}
+                                    >Show</button>
+                                </li>
+                            {/each}
+                        </ul>
+                    {/if}
+                </section>
             {:else if active.kind === 'plugin'}
                 {@const pluginActive = active}
                 {@const section = pluginUi.contributions.settings_sections.find((s) => s.plugin_id === pluginActive.plugin_id && s.surface_id === pluginActive.surface_id)}

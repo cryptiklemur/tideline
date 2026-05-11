@@ -60,7 +60,8 @@ $effect(() => {
     fetchMissingAppIcons(Array.from(all));
 });
 
-let inputs = $derived(config.channels.filter(c => c.kind === 'physical_input' || c.kind === 'input'));
+let inputs = $derived(config.channels.filter(c => (c.kind === 'physical_input' || c.kind === 'input') && !c.hidden));
+let visibleOutputs = $derived(outputs.filter(o => !(config.hidden_sinks ?? []).includes(o.name)));
 let matrixChannels = $derived(
     config.channels.map((ch, configIndex) => ({ ch, configIndex })),
 );
@@ -288,6 +289,33 @@ async function deleteChannel(index: number) {
     await applyConfig(next);
 }
 
+async function setChannelHidden(name: string, hidden: boolean) {
+    config = {
+        ...config,
+        channels: config.channels.map(c => c.name === name ? { ...c, hidden } : c),
+    };
+    try {
+        await invoke('set_channel_hidden', { name, hidden });
+    } catch (e) {
+        pipewireOk = false;
+        pipewireError = String(e);
+    }
+}
+
+async function setSinkHidden(name: string, hidden: boolean) {
+    const cur = config.hidden_sinks ?? [];
+    const next_hidden = hidden
+        ? (cur.includes(name) ? cur : [...cur, name])
+        : cur.filter(s => s !== name);
+    config = { ...config, hidden_sinks: next_hidden };
+    try {
+        await invoke('set_sink_hidden', { name, hidden });
+    } catch (e) {
+        pipewireOk = false;
+        pipewireError = String(e);
+    }
+}
+
 async function reorderChannel(fromIndex: number, toIndex: number) {
     if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0) return;
     if (fromIndex >= config.channels.length || toIndex > config.channels.length) return;
@@ -460,7 +488,7 @@ onDestroy(() => pluginUi.teardown());
     <div class="flex flex-1 min-h-0">
         <Sidebar
             {inputs}
-            {outputs}
+            outputs={visibleOutputs}
             mixes={config.mixes}
             {selectedInput}
             {selectedOutput}
@@ -641,6 +669,7 @@ onDestroy(() => pluginUi.teardown());
                         onAddSource={(s) => addSource(inputIndex, s)}
                         onRemoveSource={(s) => removeSource(inputIndex, s)}
                         onDelete={() => deleteChannel(inputIndex)}
+                        onHide={() => { const n = activeInput.name; selectedInput = null; activeView = 'mixes'; setChannelHidden(n, true); }}
                     />
                     {#each detailOverlays as o (o.plugin_id + ':' + o.surface_id)}
                         <ChannelOverlay overlay={o} emit={(e) => pluginUi.emit(o.plugin_id, e)} />
@@ -655,6 +684,7 @@ onDestroy(() => pluginUi.teardown());
                     <OutputDetail
                         sinkName={activeOutput.name}
                         description={activeOutput.description}
+                        onHide={() => { const n = activeOutput.name; selectedOutput = null; activeView = 'mixes'; setSinkHidden(n, true); }}
                     />
                 </div>
             {:else if activeMix}

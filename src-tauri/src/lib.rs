@@ -166,12 +166,14 @@ fn emit_source_mute(app: &AppHandle, name: &str, muted: bool) {
         EVT_SOURCE_MUTE,
         serde_json::json!({ "source_name": name, "muted": muted }),
     );
+    refresh_tray_menu(app);
 }
 fn emit_sink_mute(app: &AppHandle, name: &str, muted: bool) {
     let _ = app.emit(
         EVT_SINK_MUTE,
         serde_json::json!({ "sink_name": name, "muted": muted }),
     );
+    refresh_tray_menu(app);
 }
 fn emit_source_volume(app: &AppHandle, name: &str, volume_pct: u32) {
     let _ = app.emit(
@@ -2122,6 +2124,60 @@ fn set_channel_icon(name: String, icon: String, state: State<'_, AppState>) -> R
     Ok(())
 }
 
+
+#[tauri::command]
+fn set_channel_hidden(
+    app: AppHandle,
+    name: String,
+    hidden: bool,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let mut cfg = state.config.lock().unwrap().clone();
+    let mut found = false;
+    for c in cfg.channels.iter_mut() {
+        if c.name == name {
+            c.hidden = hidden;
+            found = true;
+            break;
+        }
+    }
+    if !found {
+        return Err(format!("channel '{}' not found", name));
+    }
+    save_config_to_disk(&cfg)?;
+    *state.config.lock().unwrap() = cfg;
+    refresh_tray_menu(&app);
+    Ok(())
+}
+
+
+#[tauri::command]
+fn set_sink_hidden(
+    app: AppHandle,
+    name: String,
+    hidden: bool,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let mut cfg = state.config.lock().unwrap().clone();
+    let already = cfg.hidden_sinks.iter().any(|s| s == &name);
+    if hidden && !already {
+        cfg.hidden_sinks.push(name);
+    } else if !hidden && already {
+        cfg.hidden_sinks.retain(|s| s != &name);
+    } else {
+        return Ok(());
+    }
+    save_config_to_disk(&cfg)?;
+    *state.config.lock().unwrap() = cfg;
+    refresh_tray_menu(&app);
+    Ok(())
+}
+
+#[tauri::command]
+fn get_hidden_sinks(state: State<'_, AppState>) -> Vec<String> {
+    state.config.lock().unwrap().hidden_sinks.clone()
+}
+
 #[tauri::command]
 fn reorder_channels(order: Vec<String>, state: State<'_, AppState>) -> Result<(), String> {
     let mut cfg = state.config.lock().unwrap().clone();
@@ -2233,6 +2289,68 @@ fn build_tray_menu(
         let sep = PredefinedMenuItem::separator(app)?;
         menu.append(&sep)?;
     }
+
+    let hidden: std::collections::HashSet<&str> =
+        cfg.hidden_sinks.iter().map(|s| s.as_str()).collect();
+    let visible_sinks: Vec<SinkInfo> = fetch_sinks()
+        .into_iter()
+        .filter(|s| !hidden.contains(s.name.as_str()))
+        .collect();
+    if !visible_sinks.is_empty() {
+        let header = MenuItem::with_id(app, "hdr_outputs", "Outputs", false, None::<&str>)?;
+        menu.append(&header)?;
+        for s in &visible_sinks {
+            let item = CheckMenuItem::with_id(
+                app,
+                format!("sinkmute:{}", s.name),
+                &s.description,
+                true,
+                !s.muted,
+                None::<&str>,
+            )?;
+            menu.append(&item)?;
+        }
+        let sep = PredefinedMenuItem::separator(app)?;
+        menu.append(&sep)?;
+    }
+
+    let visible_inputs: Vec<&ChannelCfg> = cfg
+        .channels
+        .iter()
+        .filter(|c| {
+            !c.hidden && (c.kind == ChannelKind::Input || c.kind == ChannelKind::PhysicalInput)
+        })
+        .collect();
+    if !visible_inputs.is_empty() {
+        let header = MenuItem::with_id(app, "hdr_inputs", "Inputs", false, None::<&str>)?;
+        menu.append(&header)?;
+        for ch in &visible_inputs {
+            let muted = if ch.kind == ChannelKind::PhysicalInput {
+                if ch.physical_source.is_empty() {
+                    false
+                } else {
+                    get_source_state(ch.physical_source.clone())
+                        .map(|(_, m)| m)
+                        .unwrap_or(false)
+                }
+            } else {
+                let sink = sink_node_for_channel(ch);
+                get_sink_state(sink).map(|(_, m)| m).unwrap_or(false)
+            };
+            let item = CheckMenuItem::with_id(
+                app,
+                format!("chmute:{}", ch.name),
+                &ch.name,
+                true,
+                !muted,
+                None::<&str>,
+            )?;
+            menu.append(&item)?;
+        }
+        let sep = PredefinedMenuItem::separator(app)?;
+        menu.append(&sep)?;
+    }
+
     let mut tray_items = app
         .try_state::<TrayItemsCache>()
         .map(|c| c.inner().0.lock().unwrap().clone())
@@ -2618,6 +2736,16 @@ pub fn run() {
                             *state.mix_enabled.lock().unwrap() = map;
                             refresh_tray_menu(app);
                         }
+                        s if s.starts_with("chmute:") => {
+                            let name = s.trim_start_matches("chmute:").to_string();
+                            channel_mute(app, &name);
+                            refresh_tray_menu(app);
+                        }
+                        s if s.starts_with("sinkmute:") => {
+                            let sink = s.trim_start_matches("sinkmute:").to_string();
+                            output_mute(app, &sink);
+                            refresh_tray_menu(app);
+                        }
                         s if s.starts_with("plugin:") => {
                             let rest = &s["plugin:".len()..];
                             if let Some((plugin_id, action_id)) = rest.split_once(':') {
@@ -2687,6 +2815,9 @@ pub fn run() {
             save_config_quiet,
             reorder_channels,
             set_channel_icon,
+            set_channel_hidden,
+            set_sink_hidden,
+            get_hidden_sinks,
             list_sinks,
             list_sink_input_nodes,
             window_minimize,

@@ -20,6 +20,7 @@ export interface ChannelConfig {
     physical_source: string;
     icon: string;
     plugin_data?: Record<string, unknown>;
+    hidden?: boolean;
 }
 
 export interface Mix {
@@ -41,6 +42,7 @@ export interface AppConfig {
     channels: ChannelConfig[];
     keybinds: Record<string, KeybindAction>;
     plugin_data?: Record<string, unknown>;
+    hidden_sinks?: string[];
 }
 
 export interface SinkInfo {
