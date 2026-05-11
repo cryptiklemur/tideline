@@ -2124,7 +2124,6 @@ fn set_channel_icon(name: String, icon: String, state: State<'_, AppState>) -> R
     Ok(())
 }
 
-
 #[tauri::command]
 fn set_channel_hidden(
     app: AppHandle,
@@ -2149,7 +2148,6 @@ fn set_channel_hidden(
     refresh_tray_menu(&app);
     Ok(())
 }
-
 
 #[tauri::command]
 fn set_sink_hidden(
