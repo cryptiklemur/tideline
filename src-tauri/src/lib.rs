@@ -2095,13 +2095,26 @@ fn save_config_quiet(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    // "Quiet" path for low-risk edits (add/remove a program on a channel,
+    // tweak keybinds). Persists the new config and refreshes the pulse.rules
+    // file used as a startup hint for newly-created streams, but does NOT
+    // restart any audio services. The `routing::spawn` polling loop reads
+    // AppState every 500ms and uses `pactl move-sink-input` to move existing
+    // sink-inputs onto the correct channel sink, so a restart is not needed
+    // to make routing changes take effect.
+    //
+    // Previously this function called `systemctl --user restart wireplumber`,
+    // which (a) was the wrong service — pulse.rules is read by pipewire-pulse,
+    // not wireplumber, (b) skipped the safety dance in `restart_pipewire_stack`
+    // (mute snapshot/restore, host:pipewire_restarting plugin notification,
+    // 800ms settle), wiping source mutes and severing the in-process LV2
+    // host's pipewire links with no chance to re-attach, and (c) was redundant
+    // with the polling loop. The result was that every add/remove of an app
+    // on a channel broke audio.
     save_config_to_disk(&config)?;
     write_app_routing(&config)?;
     *state.config.lock().unwrap() = config;
     register_all_keybinds(&app);
-    let _ = Command::new("systemctl")
-        .args(["--user", "restart", "wireplumber"])
-        .status();
     Ok(())
 }
 
