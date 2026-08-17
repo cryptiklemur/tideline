@@ -738,6 +738,20 @@ pub fn reapply_all_channel_volumes_and_mutes(app: &AppHandle) {
     );
 }
 
+/// Schedule reapply of per-channel volumes/mutes at staggered delays after
+/// a pipewire restart. Sink-inputs come back over the first few seconds
+/// as the conf loads and apps reconnect; one reapply can miss the
+/// late-arriving ones (notably the per-mix loopbacks for FX channels).
+/// Hammering at 400ms / 1.2s / 2.5s / 5s catches all of them.
+pub fn schedule_post_restart_mute_reapply(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        for delay_ms in [400u64, 1200, 2500, 5000] {
+            tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+            reapply_all_channel_volumes_and_mutes(&app);
+        }
+    });
+}
+
 #[tauri::command]
 fn get_all_channel_volumes() -> HashMap<String, ChannelVolumes> {
     read_all_volumes()
@@ -2052,6 +2066,7 @@ async fn save_config(
 
     let old = state.config.lock().unwrap().clone();
 
+    let mut restarted = false;
     let msg = if let Some(added) = try_soft_apply(&old, &config) {
         let mix_mutes = build_mix_mutes(&config);
         let contributions: Vec<Vec<tideline_core::pipewire::directive::PipewireDirective>> =
@@ -2095,6 +2110,7 @@ async fn save_config(
         if let Some(err) = soft_failed {
             eprintln!("soft apply failed ({}); falling back to restart", err);
             restart_pipewire_stack(&registry).await;
+            restarted = true;
             let mut m = String::from("Applied. Audio engine restarted (soft apply failed).");
             if !backed_up.is_empty() {
                 m.push_str(&format!(
@@ -2119,13 +2135,28 @@ async fn save_config(
             m
         }
     } else {
-        write_pipewire_and_restart(&config, &registry).await?
+        let msg = write_pipewire_and_restart(&config, &registry).await?;
+        // write_pipewire_and_restart only restarts when the rendered conf
+        // actually changed — detect that from the message rather than
+        // always rescheduling (the no-op path returns "Already current.").
+        if !msg.contains("no restart") && !msg.starts_with("Already current") {
+            restarted = true;
+        }
+        msg
     };
 
     *state.config.lock().unwrap() = config.clone();
     reapply_mix_enabled_state(&app, &state);
     refresh_tray_menu(&app);
     register_all_keybinds(&app);
+
+    // After a pipewire restart, every freshly-minted sink-input defaults
+    // to 100% unmuted — without this, "muted in mix" silently flips back
+    // to live audio whenever a rename/add/remove forces a conf rewrite.
+    if restarted {
+        schedule_post_restart_mute_reapply(app.clone());
+    }
+
     Ok(msg)
 }
 
@@ -2617,17 +2648,7 @@ pub fn run() {
                             Ok(msg) => eprintln!("[pipewire] rebuild ok — {msg}"),
                             Err(e) => eprintln!("[pipewire] rebuild failed: {e}"),
                         }
-                        // Sink-inputs come back up over the next second or
-                        // two as apps reconnect; mute is per-sink-input so a
-                        // single reapply may miss late arrivals. Hammer it
-                        // a few times to catch them.
-                        let app_for_mute = app_for_rebuild.clone();
-                        tauri::async_runtime::spawn(async move {
-                            for delay_ms in [400u64, 1200, 2500, 5000] {
-                                tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
-                                reapply_all_channel_volumes_and_mutes(&app_for_mute);
-                            }
-                        });
+                        schedule_post_restart_mute_reapply(app_for_rebuild.clone());
                     }
                 });
             }
