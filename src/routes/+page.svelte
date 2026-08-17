@@ -285,8 +285,32 @@ async function addInput(kind: 'input' | 'physical_input', name: string, physical
 }
 
 async function deleteChannel(index: number) {
+    const prev = config;
+    const removed = config.channels[index];
+    if (!removed) return;
     const next: AppConfig = { ...config, channels: config.channels.filter((_, i) => i !== index) };
-    await applyConfig(next);
+    config = next;
+    if (activeView === 'input' && selectedInput === removed.name) {
+        activeView = 'mixes';
+        selectedInput = null;
+    }
+    if (settingsForChannel?.name === removed.name) {
+        settingsForIndex = null;
+    }
+    try {
+        await invoke('save_config', { config: $state.snapshot(next) });
+        if (!pipewireOk) { pipewireOk = true; pipewireError = ''; }
+    } catch (e) {
+        config = prev;
+        pipewireOk = false;
+        pipewireError = String(e);
+        toaster.push({
+            kind: 'error',
+            title: `Could not delete "${removed.name}"`,
+            body: String(e),
+            timeoutMs: 8000,
+        });
+    }
 }
 
 async function setChannelHidden(name: string, hidden: boolean) {
