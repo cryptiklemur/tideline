@@ -393,20 +393,26 @@ impl AudioEngine {
         !self.active_uis.lock().is_empty()
     }
 
-    /// Drop every JACK-backed channel and every active plugin UI. Used when
-    /// pipewire restarts under us — the old JACK clients are dead, so we must
-    /// build fresh ones (callers reapply persisted state afterwards).
+    /// Drop every active plugin UI and forget every JACK-backed channel. Used
+    /// when pipewire restarts under us. The old JACK clients hold
+    /// memory-mapped regions allocated by libpipewire-jack; those mappings
+    /// are unmapped the moment pipewire restarts. Calling jack_client_close
+    /// on a stale client (which is what AsyncClient's Drop does) re-enters
+    /// pw_memmap_free on freed memory and aborts the process. We sidestep
+    /// that by `mem::forget`ing the stale channel map — the OS reclaims the
+    /// memory; callers immediately rebuild fresh channels on top.
     pub fn clear_all_channels(&self) {
-        // Drop UIs first; some hold references back into channels through the
-        // controller, and freeing the X window before tearing down the JACK
-        // client avoids surprising the audio thread mid-process.
+        // Drop UIs first; they don't hold JACK clients and can drop safely.
         {
             let mut uis = self.active_uis.lock();
             uis.clear();
         }
         let mut channels = self.channels.lock();
-        channels.clear();
-        tracing::info!("AudioEngine::clear_all_channels: all channels and UIs dropped");
+        let stale = std::mem::take(&mut *channels);
+        std::mem::forget(stale);
+        tracing::info!(
+            "AudioEngine::clear_all_channels: stale JACK channels mem::forgotten (pipewire-restart safety)"
+        );
     }
 }
 
