@@ -2,6 +2,7 @@
 mod glib_log;
 mod levels;
 mod plugins;
+mod recovery;
 mod routing;
 
 use levels::LevelMonitor;
@@ -2586,6 +2587,7 @@ pub fn run() {
                 });
             }
             app.manage(plugin_registry.clone());
+            recovery::spawn(app.handle().clone());
             let iframe_bridge = tideline_host::IframeBridge::new(plugin_registry.clone());
             app.manage(iframe_bridge);
             let mut iframe_rx = plugin_registry.subscribe_iframe_messages();
