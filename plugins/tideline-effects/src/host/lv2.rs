@@ -275,7 +275,9 @@ impl Plugin for Lv2Plugin {
                 map.insert(param.symbol.clone(), v);
             }
         }
-        tracing::debug!(uri = %self.info.uri, port_count = map.len(), values = ?map, "save_state");
+        // the periodic crash backstop calls this per plugin per tick. dumping
+        // `map` here was 99% of the log volume, ~2.5kb a line at 83/min.
+        tracing::trace!(uri = %self.info.uri, port_count = map.len(), "save_state");
         Ok(serde_json::to_vec(&map)?)
     }
 

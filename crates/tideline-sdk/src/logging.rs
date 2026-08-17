@@ -17,6 +17,10 @@ use tracing_subscriber::{fmt, EnvFilter, Layer};
 const DEFAULT_FILTER: &str =
     "info,tideline=debug,tideline_effects=debug,tideline_sdk=debug,tideline_host=debug,tideline_core=debug";
 
+/// Daily files older than this get deleted on rotation. Without it the log
+/// dir grows forever; it had reached 5.1gb.
+const LOG_RETENTION_DAYS: usize = 7;
+
 pub fn log_dir() -> PathBuf {
     dirs::cache_dir()
         .unwrap_or_else(std::env::temp_dir)
@@ -45,7 +49,26 @@ pub fn init(process_name: &str) -> Option<WorkerGuard> {
         return None;
     }
 
-    let file_appender = tracing_appender::rolling::daily(&dir, format!("{process_name}.log"));
+    let file_appender = match tracing_appender::rolling::Builder::new()
+        .rotation(tracing_appender::rolling::Rotation::DAILY)
+        .filename_prefix(format!("{process_name}.log"))
+        .max_log_files(LOG_RETENTION_DAYS)
+        .build(&dir)
+    {
+        Ok(appender) => appender,
+        Err(e) => {
+            eprintln!(
+                "logging: cant open {}: {e}; using stderr only",
+                dir.display()
+            );
+            let stderr_layer = fmt::layer()
+                .with_writer(std::io::stderr)
+                .with_target(true)
+                .with_filter(env_filter());
+            let _ = tracing_subscriber::registry().with(stderr_layer).try_init();
+            return None;
+        }
+    };
     let (file_writer, guard) = tracing_appender::non_blocking(file_appender);
 
     let stderr_layer = fmt::layer()
