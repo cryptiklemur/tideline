@@ -113,6 +113,12 @@ pub struct AppConfig {
     pub plugin_data: HashMap<String, Value>,
     #[serde(default)]
     pub hidden_sinks: Vec<String>,
+    #[serde(default = "default_true")]
+    pub force_rebuild_at_startup: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl AppConfig {
