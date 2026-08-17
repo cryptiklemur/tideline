@@ -5,6 +5,7 @@ pub mod topology;
 
 use crate::config_io::{pipewire_conf_dir, pulse_conf_dir, slug, wireplumber_conf_dir};
 use crate::model::{AppConfig, ChannelCfg, ChannelKind, Mix};
+use std::collections::HashSet;
 use std::fs;
 
 pub const TIDELINE_PIPEWIRE_FILE: &str = "50-tideline.conf";
@@ -44,15 +45,64 @@ pub fn build_pipewire_conf(
     cfg: &AppConfig,
     contributions: &[Vec<directive::PipewireDirective>],
     mix_mutes: &[directive::MixMuteEntry],
+    available_sinks: Option<&HashSet<String>>,
 ) -> String {
-    let mut directives = topology::build_base_topology(cfg, mix_mutes);
+    let mut directives = topology::build_base_topology(cfg, mix_mutes, available_sinks);
     for batch in contributions {
         directives = contribute::apply_contribution(directives, batch);
+    }
+    if let Some(available) = available_sinks {
+        directives = drop_loopbacks_to_absent_sinks(cfg, directives, available);
     }
     serialize::serialize_directives(&directives)
 }
 
-pub fn generate_pipewire_config(cfg: &AppConfig) -> Result<String, String> {
+/// The `playback.props` `target.object` of a loopback, if it has one.
+fn playback_target(d: &directive::PipewireDirective) -> Option<&str> {
+    let directive::PipewireDirective::LoadModule { args, .. } = d else {
+        return None;
+    };
+    let props = args.iter().find_map(|(k, v)| match (k.as_str(), v) {
+        ("playback.props", directive::ArgValue::Group(props)) => Some(props),
+        _ => None,
+    })?;
+    props.iter().find_map(|(k, v)| match (k.as_str(), v) {
+        ("target.object", directive::ArgValue::Quoted(s)) => Some(s.as_str()),
+        _ => None,
+    })
+}
+
+/// Base topology filters its own mix targets, but plugin contributors build
+/// loopbacks too and cant see the sink list from their own process. This is
+/// the one chokepoint every directive passes through, so it catches them all.
+///
+/// Only names that appear in some `mix.sinks` are eligible to be dropped.
+/// Internal targets (`fx_source.*`, the per-channel JACK clients) are never
+/// real sinks and would otherwise all get culled.
+fn drop_loopbacks_to_absent_sinks(
+    cfg: &AppConfig,
+    directives: Vec<directive::PipewireDirective>,
+    available: &HashSet<String>,
+) -> Vec<directive::PipewireDirective> {
+    let configured: HashSet<&str> = cfg
+        .mixes
+        .iter()
+        .flat_map(|m| m.sinks.iter().map(|s| s.as_str()))
+        .collect();
+
+    directives
+        .into_iter()
+        .filter(|d| match playback_target(d) {
+            Some(t) => !configured.contains(t) || available.contains(t),
+            None => true,
+        })
+        .collect()
+}
+
+pub fn generate_pipewire_config(
+    cfg: &AppConfig,
+    available_sinks: Option<&HashSet<String>>,
+) -> Result<String, String> {
     if cfg.mixes.is_empty() {
         return Err("At least one mix is required. Open the Mixes view and add one.".into());
     }
@@ -60,7 +110,7 @@ pub fn generate_pipewire_config(cfg: &AppConfig) -> Result<String, String> {
         return Err("At least one channel is required.".into());
     }
 
-    Ok(build_pipewire_conf(cfg, &[], &[]))
+    Ok(build_pipewire_conf(cfg, &[], &[], available_sinks))
 }
 
 pub fn generate_app_routing_config(cfg: &AppConfig) -> String {
@@ -106,14 +156,18 @@ pub fn write_app_routing(cfg: &AppConfig) -> Result<(), String> {
     fs::write(&target, body).map_err(|e| e.to_string())
 }
 
-pub fn write_pipewire_conf(cfg: &AppConfig) -> Result<Vec<String>, String> {
-    write_pipewire_conf_with_contributions(cfg, &[], &[])
+pub fn write_pipewire_conf(
+    cfg: &AppConfig,
+    available_sinks: Option<&HashSet<String>>,
+) -> Result<Vec<String>, String> {
+    write_pipewire_conf_with_contributions(cfg, &[], &[], available_sinks)
 }
 
 pub fn write_pipewire_conf_with_contributions(
     cfg: &AppConfig,
     contributions: &[Vec<directive::PipewireDirective>],
     mix_mutes: &[directive::MixMuteEntry],
+    available_sinks: Option<&HashSet<String>>,
 ) -> Result<Vec<String>, String> {
     if cfg.mixes.is_empty() {
         return Err("At least one mix is required. Open the Mixes view and add one.".into());
@@ -121,7 +175,7 @@ pub fn write_pipewire_conf_with_contributions(
     if cfg.channels.is_empty() {
         return Err("At least one channel is required.".into());
     }
-    let body = build_pipewire_conf(cfg, contributions, mix_mutes);
+    let body = build_pipewire_conf(cfg, contributions, mix_mutes, available_sinks);
 
     let dir = pipewire_conf_dir();
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;

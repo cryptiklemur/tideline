@@ -450,6 +450,19 @@ fn fetch_sinks() -> Vec<SinkInfo> {
         .collect()
 }
 
+/// Sink names present in the running graph, for filtering mix targets that
+/// point at a device that is gone. `None` when pactl gave us nothing back.
+fn available_sink_names() -> Option<std::collections::HashSet<String>> {
+    let names: std::collections::HashSet<String> =
+        fetch_sinks().into_iter().map(|s| s.name).collect();
+    if names.is_empty() {
+        // pipewire is down or still coming up; filtering here would strip
+        // every loopback and write an empty conf.
+        return None;
+    }
+    Some(names)
+}
+
 fn fetch_sources() -> Vec<SourceInfo> {
     let raw = pactl_output(&["-f", "json", "list", "sources"]);
     let json: serde_json::Value = serde_json::from_str(&raw).unwrap_or_default();
@@ -1002,7 +1015,13 @@ pub async fn write_pipewire_and_restart(
     // already on disk. This collapses the rapid-fire rebuilds (multiple
     // attach_channel_data + rack_changed pokes within the same debounce
     // window) into a single state transition.
-    let new_body = tideline_core::pipewire::build_pipewire_conf(cfg, &contributions, &mix_mutes);
+    let available = available_sink_names();
+    let new_body = tideline_core::pipewire::build_pipewire_conf(
+        cfg,
+        &contributions,
+        &mix_mutes,
+        available.as_ref(),
+    );
     let conf_path = tideline_core::config_io::pipewire_conf_dir()
         .join(tideline_core::pipewire::TIDELINE_PIPEWIRE_FILE);
     let unchanged = std::fs::read_to_string(&conf_path)
@@ -1013,7 +1032,12 @@ pub async fn write_pipewire_and_restart(
         wire_fx_links(cfg).await;
         return Ok("Already current. (no restart)".into());
     }
-    let backed_up = write_pipewire_conf_with_contributions(cfg, &contributions, &mix_mutes)?;
+    let backed_up = write_pipewire_conf_with_contributions(
+        cfg,
+        &contributions,
+        &mix_mutes,
+        available.as_ref(),
+    )?;
     restart_pipewire_stack(registry).await;
     // Pipewire's autoconnect can't link to JACK clients (media.class=null),
     // so the contributor sets node.autoconnect=false on fx_node-targeted
@@ -1040,6 +1064,8 @@ pub async fn write_pipewire_and_restart(
 /// of `audio.position`. JACK clients expose channel-named ports
 /// (`in_FL`, `in_FR`, `out_FL`, `out_FR`).
 pub async fn wire_fx_links(cfg: &AppConfig) {
+    let available = available_sink_names();
+    let available = available.as_ref();
     let mut pairs: Vec<(String, String)> = Vec::new();
     for ch in &cfg.channels {
         let effects_data = ch.plugin_data.get("tideline-effects");
@@ -1114,7 +1140,12 @@ pub async fn wire_fx_links(cfg: &AppConfig) {
                     ));
                 }
                 for mix in &cfg.mixes {
-                    for (i, _target) in mix.sinks.iter().enumerate() {
+                    for (i, target) in mix.sinks.iter().enumerate() {
+                        // the conf builder skips loopbacks to absent sinks, so
+                        // their capture nodes dont exist to link to either.
+                        if available.is_some_and(|set| !set.contains(target)) {
+                            continue;
+                        }
                         let cap = mix_capture_node(ch, mix, i);
                         pairs.push((format!("{fx}:out_FL"), format!("{cap}:input_0")));
                         pairs.push((format!("{fx}:out_FR"), format!("{cap}:input_1")));
@@ -1195,7 +1226,12 @@ pub async fn write_pipewire_conf_only(
             .into_iter()
             .map(|c| c.directives)
             .collect();
-    write_pipewire_conf_with_contributions(cfg, &contributions, &mix_mutes)?;
+    write_pipewire_conf_with_contributions(
+        cfg,
+        &contributions,
+        &mix_mutes,
+        available_sink_names().as_ref(),
+    )?;
     Ok(())
 }
 
@@ -2028,8 +2064,12 @@ async fn save_config(
             .into_iter()
             .map(|c| c.directives)
             .collect();
-        let backed_up =
-            write_pipewire_conf_with_contributions(&config, &contributions, &mix_mutes)?;
+        let backed_up = write_pipewire_conf_with_contributions(
+            &config,
+            &contributions,
+            &mix_mutes,
+            available_sink_names().as_ref(),
+        )?;
         let mut soft_failed: Option<String> = None;
         for ch in &added {
             if let Err(e) = load_channel_modules(&config, ch) {

@@ -2,6 +2,7 @@ use super::directive::{ArgValue, LoadModuleHeader, PipewireDirective, Rewireable
 use super::{fx_source_node, mix_capture_node, mix_playback_node, sink_node_for_channel};
 use crate::config_io::slug;
 use crate::model::{AppConfig, ChannelKind};
+use std::collections::HashSet;
 
 fn quoted(s: impl Into<String>) -> ArgValue {
     ArgValue::Quoted(s.into())
@@ -38,9 +39,12 @@ fn loopback_directive(
     }
 }
 
+/// `available_sinks` is the set of sinks present in the running graph.
+/// `None` means we could not enumerate them, so nothing gets filtered.
 pub fn build_base_topology(
     cfg: &AppConfig,
     _mix_mutes: &[super::directive::MixMuteEntry],
+    available_sinks: Option<&HashSet<String>>,
 ) -> Vec<PipewireDirective> {
     // Mute is no longer enforced at the conf level — post-loopbacks
     // always exist and mute is applied at runtime via
@@ -72,6 +76,11 @@ pub fn build_base_topology(
                 let sink_name = sink_node_for_channel(ch);
                 for mix in &cfg.mixes {
                     for (i, target) in mix.sinks.iter().enumerate() {
+                        // a loopback to a sink that isnt there never links.
+                        // wireplumber retries it forever and the graph stalls.
+                        if available_sinks.is_some_and(|set| !set.contains(target)) {
+                            continue;
+                        }
                         let cap = mix_capture_node(ch, mix, i);
                         let pb = mix_playback_node(ch, mix, i);
                         let capture_props = vec![
@@ -175,6 +184,7 @@ pub fn build_base_topology(
                     vec![
                         ("node.name".into(), quoted(feed_pb)),
                         ("target.object".into(), quoted(&virt_source)),
+                        ("node.autoconnect".into(), literal("false")),
                         ("audio.position".into(), fl_fr()),
                     ],
                     loopback_tag.clone(),
@@ -182,6 +192,9 @@ pub fn build_base_topology(
 
                 for mix in &cfg.mixes {
                     for (i, target) in mix.sinks.iter().enumerate() {
+                        if available_sinks.is_some_and(|set| !set.contains(target)) {
+                            continue;
+                        }
                         let cap = mix_capture_node(ch, mix, i);
                         let pb = mix_playback_node(ch, mix, i);
                         let capture_props = vec![

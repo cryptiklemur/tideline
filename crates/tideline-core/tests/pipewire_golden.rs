@@ -10,7 +10,7 @@ fn pipewire_conf_matches_golden() {
     let input_json =
         fs::read_to_string(Path::new(FIXTURE_DIR).join("baseline_input.json")).unwrap();
     let cfg: AppConfig = serde_json::from_str(&input_json).unwrap();
-    let actual = generate_pipewire_config(&cfg).unwrap();
+    let actual = generate_pipewire_config(&cfg, None).unwrap();
     let expected = fs::read_to_string(Path::new(FIXTURE_DIR).join("baseline.conf")).unwrap();
     pretty_assertions::assert_eq!(actual, expected);
 }
@@ -21,6 +21,6 @@ fn regenerate_golden() {
     let input_json =
         fs::read_to_string(Path::new(FIXTURE_DIR).join("baseline_input.json")).unwrap();
     let cfg: AppConfig = serde_json::from_str(&input_json).unwrap();
-    let actual = generate_pipewire_config(&cfg).unwrap();
+    let actual = generate_pipewire_config(&cfg, None).unwrap();
     fs::write(Path::new(FIXTURE_DIR).join("baseline.conf"), actual).unwrap();
 }
