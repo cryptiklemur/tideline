@@ -119,7 +119,7 @@ impl HostBackend for TauriHostBackend {
         let app = self.app.clone();
         let app_for_pw = self.app.clone();
         let namespace_for_pw = namespace.clone();
-        tokio::task::spawn_blocking(move || -> Result<(), String> {
+        let changed = tokio::task::spawn_blocking(move || -> Result<bool, String> {
             // Source of truth is the app's in-memory AppState. Without
             // mutating it here, downstream consumers (write_pipewire_and_restart)
             // read a stale snapshot and ignore the just-attached plugin_data.
@@ -139,6 +139,17 @@ impl HostBackend for TauriHostBackend {
                         "attach_channel_data: channel {channel_uuid} not found"
                     ));
                 };
+                // Idempotency guard: if the incoming value already matches
+                // what is stored, this attach is a no-op. The effects
+                // plugin's periodic persistence backstop re-attaches
+                // unchanged channel state on a timer; without this guard
+                // every tick rewrote config, emitted a change event, and
+                // poked a pipewire rebuild — spinning a perpetual
+                // rebuild + mute-reapply loop that hammered pactl and
+                // chopped audio. Skip the write/emit/poke when unchanged.
+                if channel.plugin_data.get(&namespace) == Some(&value) {
+                    return Ok(false);
+                }
                 channel.plugin_data.insert(namespace.clone(), value);
                 cfg.clone()
             };
@@ -150,10 +161,16 @@ impl HostBackend for TauriHostBackend {
                     "namespace": namespace,
                 }),
             );
-            Ok(())
+            Ok(true)
         })
         .await
         .map_err(|e| format!("attach_channel_data join failed: {e}"))??;
+
+        // Nothing changed — don't poke the rebuild worker. This is what
+        // keeps the periodic backstop re-attach from driving a rebuild loop.
+        if !changed {
+            return Ok(());
+        }
 
         // Direct rebuild trigger: if the calling plugin contributes to
         // pipewire, nudge the debounced rebuild worker so its conf is

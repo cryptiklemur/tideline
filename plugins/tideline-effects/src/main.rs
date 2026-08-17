@@ -172,7 +172,7 @@ impl Plugin for EffectsPlugin {
             loop {
                 tick.tick().await;
                 if s.engine().is_some() {
-                    persist::refresh_state_and_save(s.clone()).await;
+                    persist::refresh_state_to_disk(s.clone()).await;
                 }
             }
         });

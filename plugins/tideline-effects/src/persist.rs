@@ -143,19 +143,54 @@ pub async fn save_chains_to_disk(state: &EffectsState) {
 }
 
 /// Pull every loaded plugin's current state via `Plugin::save_state`, store
-/// the resulting blob on each `Effect`, then write `chains.json` AND push the
+/// the resulting blob on each `Effect`, write `chains.json`, AND push the
 /// fresh state_b64 into `AppConfig.plugin_data` via `channel_attach_data`.
-/// Both sinks are required because the first-call sync in
+/// The host mirror is required because the first-call sync in
 /// `pipewire_contributor::respond` reconciles engine state from AppConfig —
 /// if AppConfig only sees blobs from when an effect was first added, every
 /// restart wipes any param tweaks the user made since.
+///
+/// Only call this on a *real* state change (the debounced `save_trigger`
+/// path or an explicit `persist_now` IPC). The host mirror re-attaches
+/// channel data, which pokes a pipewire rebuild on the host. The periodic
+/// crash backstop must use [`refresh_state_to_disk`] instead, since LV2
+/// `save_state` blobs are non-deterministic and would otherwise trigger a
+/// rebuild + mute-reapply storm every tick for no real config change.
 pub async fn refresh_state_and_save(state: Arc<EffectsState>) {
+    if !refresh_chains_to_disk(&state).await {
+        return;
+    }
+    // Mirror the same blobs into the host's AppConfig.plugin_data so the
+    // first-call reconcile on next launch sees the latest values, not the
+    // initial state_b64 captured when the effect was first added.
+    if let Some(host) = state.host.get() {
+        for channel in state.channels_with_effects().await {
+            if let Err(e) = crate::iframe_bridge::persist_channel(&state, host, channel).await {
+                tracing::warn!(?e, %channel, "refresh_state_and_save: persist_channel failed");
+            }
+        }
+    }
+}
+
+/// Periodic crash backstop: snapshot live LV2 state and write `chains.json`
+/// only, without mirroring into the host's `AppConfig.plugin_data`. Skipping
+/// the host mirror keeps the 10s tick from re-attaching channel data (which
+/// pokes a pipewire rebuild + mute reapply) when nothing actually changed.
+pub async fn refresh_state_to_disk(state: Arc<EffectsState>) {
+    let _ = refresh_chains_to_disk(&state).await;
+}
+
+/// Shared core for both save paths: snapshot live LV2 state onto the
+/// in-memory `Effect` slots and write `chains.json`. Returns `true` if a
+/// save was written, `false` if it was suppressed or guarded (so callers
+/// can skip any follow-up host mirror).
+async fn refresh_chains_to_disk(state: &Arc<EffectsState>) -> bool {
     if state
         .suppress_save
         .load(std::sync::atomic::Ordering::Relaxed)
     {
-        tracing::debug!("refresh_state_and_save: suppressed");
-        return;
+        tracing::debug!("refresh_chains_to_disk: suppressed");
+        return false;
     }
     if let Some(engine) = state.engine() {
         let snapshot = engine.snapshot_all_states();
@@ -177,22 +212,12 @@ pub async fn refresh_state_and_save(state: Arc<EffectsState>) {
     if in_mem == 0 && on_disk > 0 {
         tracing::warn!(
             on_disk,
-            "refresh_state_and_save: in-memory state empty but disk has effects — skipping save to avoid wiping user data"
+            "refresh_chains_to_disk: in-memory state empty but disk has effects — skipping save to avoid wiping user data"
         );
-        return;
+        return false;
     }
     save_chains_to_disk(&state).await;
-
-    // Mirror the same blobs into the host's AppConfig.plugin_data so the
-    // first-call reconcile on next launch sees the latest values, not the
-    // initial state_b64 captured when the effect was first added.
-    if let Some(host) = state.host.get() {
-        for channel in state.channels_with_effects().await {
-            if let Err(e) = crate::iframe_bridge::persist_channel(&state, host, channel).await {
-                tracing::warn!(?e, %channel, "refresh_state_and_save: persist_channel failed");
-            }
-        }
-    }
+    true
 }
 
 pub fn encode_state(bytes: &[u8]) -> String {
