@@ -9,6 +9,7 @@ An open-source, Linux-native take on something like Wave Link — PipeWire-based
 - **Channel routing**: physical inputs (mic, system, browser, game, music, chat, etc.) routed to per-app virtual sources/sinks via PipeWire loopback modules.
 - **Mic FX rack**: in-process LV2 host (livi + suil) with X11UI window embedding. Drag/drop chain editor, per-slot bypass, persisted across restarts. Audition mode lets you record a short clip (or pick a wav) and loop it through the chain to A/B effects without talking.
 - **Push-to-talk**: evdev or XDG portal capture for the keybind, with mute toggle, soft-mute (volume clamp), and notification/tone hooks.
+- **Tray control**: mute any input or output, switch mixes, and reach plugin actions from the system tray. Closing the window hides it to the tray instead of quitting.
 - **Plugin SDK**: stdio JSON-RPC, contribution-based UI surfaces (settings sections, channel cards, racks), shared persisted config namespace per plugin. Bundled plugins (`tideline-ptt`, `tideline-tones`, `tideline-notifications`, `tideline-effects`) live in this repo as the reference implementation.
 
 ## What doesn't
@@ -17,6 +18,19 @@ An open-source, Linux-native take on something like Wave Link — PipeWire-based
 - Wayland-only sessions for the LV2 UI path. The X11UI embedding still goes through xcb, so XWayland is fine but a pure Wayland UI host doesn't exist yet.
 - Plugin discovery for non-LV2 formats. Carla replacement landed for LV2; CLAP/VST3 are on the list.
 - Stable plugin ABI. Don't ship third-party plugins against the SDK yet — the wire protocol is moving.
+
+## Install
+
+Prebuilt x86_64 packages ship with every release. Download one from the [latest release](https://github.com/cryptiklemur/tideline/releases/latest), then install it.
+
+| Distro | File | Command |
+| --- | --- | --- |
+| Debian, Ubuntu | `Tideline_<version>_amd64.deb` | `sudo apt install ./Tideline_<version>_amd64.deb` |
+| Fedora, RHEL | `Tideline-<version>-1.x86_64.rpm` | `sudo dnf install ./Tideline-<version>-1.x86_64.rpm` |
+| Arch | `tideline-bin-<version>-1-x86_64.pkg.tar.zst` | `sudo pacman -U ./tideline-bin-<version>-1-x86_64.pkg.tar.zst` |
+| Other | `Tideline_<version>_amd64.AppImage` | `chmod +x` the file, then run it |
+
+Every package needs a running PipeWire session. There is no AUR package yet.
 
 ## Building
 
