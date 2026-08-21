@@ -1,3 +1,22 @@
+# [1.2.0](https://github.com/cryptiklemur/tideline/compare/v1.1.0...v1.2.0) (2026-08-21)
+
+
+### Bug Fixes
+
+* **audio:** reapply channel mutes after a pipewire restart ([223fa96](https://github.com/cryptiklemur/tideline/commit/223fa9642a3c559910362914537c53b2a3bd3c25))
+* **audio:** stop restarting wireplumber on app add/remove ([240014b](https://github.com/cryptiklemur/tideline/commit/240014beea03a8f9d8b6e4345ccec7a62027a9cc))
+* **effects:** forget stale JACK channels when pipewire restarts ([35fd190](https://github.com/cryptiklemur/tideline/commit/35fd1905b311c3f3ae5184c57d800997094d0bbe))
+* **effects:** stop the persistence backstop looping rebuilds ([46634b6](https://github.com/cryptiklemur/tideline/commit/46634b6670845ee25ddb2c01089744251571de18))
+* **logging:** keep only 7 days of daily logs ([0748407](https://github.com/cryptiklemur/tideline/commit/0748407e09340bff475341cdf07f08764ce24d60))
+* **ui:** roll back a channel delete when the save fails ([eab4ac6](https://github.com/cryptiklemur/tideline/commit/eab4ac661ea3c500bd94c3023985b21c329b43e8))
+
+
+### Features
+
+* **audio:** recover wedged pipewire PCMs automatically ([dbe2226](https://github.com/cryptiklemur/tideline/commit/dbe2226f0b910dd9f8547d33e9f46b605c2955e2))
+* **config:** add force_rebuild_at_startup flag ([b61edb3](https://github.com/cryptiklemur/tideline/commit/b61edb3530f08b7beb330a6a75e43dc89e613d3b))
+* **pipewire:** skip loopbacks to sinks that arent present ([d106246](https://github.com/cryptiklemur/tideline/commit/d106246e65a82fab734647acb2d17ba9a447a65b))
+
 # [1.1.0](https://github.com/cryptiklemur/tideline/compare/v1.0.1...v1.1.0) (2026-05-11)
 
 
