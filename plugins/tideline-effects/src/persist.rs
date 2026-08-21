@@ -216,7 +216,7 @@ async fn refresh_chains_to_disk(state: &Arc<EffectsState>) -> bool {
         );
         return false;
     }
-    save_chains_to_disk(&state).await;
+    save_chains_to_disk(state).await;
     true
 }
 

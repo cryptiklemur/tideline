@@ -177,7 +177,7 @@ impl EventBus {
         let mut inner = self.inner.lock().await;
         let now = Instant::now();
         let topic = event.topic.clone();
-        for (_id, inbox) in inner.inboxes.iter_mut() {
+        for inbox in inner.inboxes.values_mut() {
             if !inbox.subscriptions.contains(&topic) {
                 continue;
             }
